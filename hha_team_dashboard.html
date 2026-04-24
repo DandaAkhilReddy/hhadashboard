@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HHA Medicine — Operations Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #f0f2f5; color: #1a1a2e; font-size: 14px; }
+  .header { background: #1a1a2e; color: white; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .header h1 { font-size: 20px; font-weight: 700; }
+  .header .sub { font-size: 12px; color: #7dd3fc; margin-top: 3px; }
+  .header .meta { font-size: 12px; color: #94a3b8; text-align: right; line-height: 1.8; }
+  .update-btn { background: #3b82f6; color: white; border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .update-btn:hover { background: #2563eb; }
+  .owners-bar { background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 7px 24px; display: flex; gap: 24px; flex-wrap: wrap; }
+  .owner-chip { font-size: 11px; color: #475569; }
+  .owner-chip strong { color: #1e293b; }
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 1000; overflow-y: auto; }
+  .modal-overlay.open { display: flex; align-items: flex-start; justify-content: center; padding: 32px 16px; }
+  .modal { background: white; border-radius: 12px; width: 100%; max-width: 760px; padding: 28px; }
+  .modal h2 { font-size: 18px; margin-bottom: 6px; }
+  .modal-note { font-size: 12px; color: #64748b; margin-bottom: 20px; }
+  .modal-section { margin-bottom: 22px; }
+  .modal-section h3 { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; margin-bottom: 12px; }
+  .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; color: #475569; font-weight: 600; }
+  .field input { border: 1px solid #cbd5e1; border-radius: 5px; padding: 6px 9px; font-size: 13px; }
+  .field input:focus { outline: none; border-color: #3b82f6; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+  .btn-save { background: #1a1a2e; color: white; border: none; padding: 9px 24px; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .btn-cancel { background: #f1f5f9; color: #475569; border: none; padding: 9px 22px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px 20px; }
+  .col-full { grid-column: 1 / -1; }
+  .card { background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+  .board-label { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 12px; }
+  .bl-ops    { background: #dbeafe; color: #1d4ed8; }
+  .bl-fin    { background: #dcfce7; color: #15803d; }
+  .bl-clin   { background: #ede9fe; color: #6d28d9; }
+  .bl-people { background: #fef9c3; color: #a16207; }
+  .card-title { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .owner-tag { font-weight: 400; color: #94a3b8; font-size: 11px; margin-left: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { text-align: left; font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; padding: 5px 8px; border-bottom: 2px solid #e2e8f0; white-space: nowrap; }
+  td { padding: 7px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .mrow { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+  .mrow:last-child { border-bottom: none; }
+  .mrow-label { color: #475569; font-size: 13px; }
+  .mrow-sub { color: #94a3b8; font-size: 11px; margin-top: 1px; }
+  .mrow-val { font-weight: 700; font-size: 15px; text-align: right; }
+  .mrow-delta { font-size: 11px; margin-top: 1px; text-align: right; }
+  .c-green { color: #16a34a; } .c-yellow { color: #d97706; } .c-red { color: #dc2626; } .c-blue { color: #1d4ed8; } .c-gray { color: #94a3b8; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .b-green { background: #dcfce7; color: #16a34a; } .b-red { background: #fee2e2; color: #dc2626; }
+  .b-blue { background: #dbeafe; color: #1d4ed8; } .b-gray { background: #f1f5f9; color: #64748b; }
+  .b-yellow { background: #fef9c3; color: #b45309; }
+  .alert { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 7px; padding: 9px 12px; margin-bottom: 10px; font-size: 12px; color: #7c2d12; }
+  .alert strong { font-weight: 700; }
+  .bar-row { margin-top: 6px; }
+  .bar-labels { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
+  .bar-bg { background: #e2e8f0; border-radius: 4px; height: 9px; }
+  .bar-fill { height: 9px; border-radius: 4px; }
+  .stat-row { display: flex; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #f1f5f9; flex-wrap: wrap; }
+  .stat-box { flex: 1; min-width: 80px; text-align: center; background: #f8fafc; border-radius: 8px; padding: 10px 6px; }
+  .stat-val { font-size: 22px; font-weight: 700; }
+  .stat-label { font-size: 10px; color: #64748b; font-weight: 700; text-transform: uppercase; margin-top: 2px; }
+  .stat-sub { font-size: 10px; color: #94a3b8; margin-top: 2px; line-height: 1.4; }
+  .divider { margin: 14px 0 12px; border: none; border-top: 2px solid #f1f5f9; }
+  .section-sub { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+  .footer { font-size: 11px; color: #94a3b8; text-align: center; padding: 10px 20px 20px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .col-full { grid-column: 1; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>HHA Medicine — Operations Dashboard</h1>
+    <div class="sub">Team View · Updated daily by department owners</div>
+  </div>
+  <div class="meta"><div id="hdrDate">—</div><div id="hdrUpdated" style="color:#7dd3fc;"></div></div>
+  <button class="update-btn" onclick="openModal()">⚙ Enter Today's Data</button>
+</div>
+
+<div class="owners-bar">
+  <span class="owner-chip">🏥 <strong>Census / Shifts:</strong> Crystal Anderson</span>
+  <span class="owner-chip">💰 <strong>Collections / RCM:</strong> Sandy Collins · Maribel Reyes</span>
+  <span class="owner-chip">🩺 <strong>Clinical Quality / LOS:</strong> Dr. Pallavi Aneja · Dr. Veena Reddy</span>
+  <span class="owner-chip">👥 <strong>Headcount / Open Positions:</strong> Andrea Simon · Crystal Anderson</span>
+</div>
+
+<div class="grid">
+
+<!-- ═══ BOARD 1: OPERATIONS ═══ -->
+<div class="card col-full">
+  <div class="board-label bl-ops">Board 1 — Operations</div>
+  <div class="card-title">Florida Sites <span class="owner-tag">Daily · Crystal Anderson</span></div>
+  <table>
+    <thead><tr>
+      <th>Site</th><th>Medical Director</th><th>Liaison</th>
+      <th style="text-align:center;">Today's Census</th>
+      <th style="text-align:center;">3-Mo Avg</th>
+      <th style="text-align:center;">Mar MTD</th>
+      <th style="text-align:center;">vs. Avg</th>
+      <th style="text-align:center;">Open Shifts</th>
+      <th>Contract Thru</th>
+      <th>Annual Subsidy</th>
+      <th>Status</th>
+    </tr></thead>
+    <tbody id="flTableBody"></tbody>
+  </table>
+  <div class="stat-row">
+    <div class="stat-box"><div class="stat-val c-blue" id="flTotal">—</div><div class="stat-label">Total FL Census</div><div class="stat-sub" id="flTotalVs"></div></div>
+    <div class="stat-box"><div class="stat-val c-yellow" id="flShifts">—</div><div class="stat-label">Open Shifts</div></div>
+    <div class="stat-box"><div class="stat-val c-red" id="flBelow">—</div><div class="stat-label">Below 3-Mo Avg</div></div>
+    <div class="stat-box"><div class="stat-val" style="color:#dc2626;font-size:16px;">2 Flags</div><div class="stat-label">Active Alerts</div><div class="stat-sub">Westside (no MD)<br>Woodmont (PIP)</div></div>
+  </div>
+  <hr class="divider">
+  <div class="card-title">Texas Sites <span class="owner-tag">Dr. Veena Reddy</span></div>
+  <table>
+    <thead><tr><th>Site</th><th>Medical Director</th><th>Liaison</th><th style="text-align:center;">Today's Census</th><th style="text-align:center;">Open Shifts</th><th>Notes</th><th>Status</th></tr></thead>
+    <tbody id="txTableBody"></tbody>
+  </table>
+</div>
+
+<!-- ═══ BOARD 2: FINANCE / RCM ═══ -->
+<div class="card">
+  <div class="board-label bl-fin">Board 2 — Finance / RCM</div>
+  <div class="card-title">Collections &amp; Revenue Cycle <span class="owner-tag">Sandy Collins · Maribel Reyes</span></div>
+
+  <div class="alert"><strong>April FL Collections Lagging:</strong> Daily avg $103,769 vs. $147,727 target. Under investigation — likely Ventra timing artifact.</div>
+
+  <div class="mrow">
+    <div><div class="mrow-label">FL Daily Collections</div><div class="mrow-sub">Target: $147,727 / day</div></div>
+    <div><div class="mrow-val c-red" id="flCollAmt">$103,769</div><div class="mrow-delta c-red" id="flCollDelta">▼ $43,958 below target</div></div>
+  </div>
+  <div class="mrow">
+    <div><div class="mrow-label">TX Daily Collections</div><div class="mrow-sub">Target: ~$22,500 / day</div></div>
+    <div><div class="mrow-val c-green" id="txCollAmt">$28,127</div><div class="mrow-delta c-gray">Apr MTD per prior report</div></div>
+  </div>
+  <div class="mrow">
+    <div><div class="mrow-label">MTD FL Collections</div><div class="mrow-sub">Target: $3,250,000 / month</div></div>
+    <div><div class="mrow-val c-yellow" id="mtdCollAmt">—</div><div class="mrow-delta c-gray" id="mtdNote">Enter via Update Data</div></div>
+  </div>
+
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid #f1f5f9;">
+    <div class="section-sub">AR Aging — % Over 120 Days &nbsp;(Target &lt;15%)</div>
+    <div class="bar-row"><div class="bar-labels"><span>Florida</span><span id="flARPct" class="c-red" style="font-weight:700;">25%</span></div><div class="bar-bg"><div class="bar-fill" id="flARBar" style="width:25%;background:#dc2626;"></div></div></div>
+    <div class="bar-row" style="margin-top:8px;"><div class="bar-labels"><span>Texas</span><span id="txARPct" class="c-red" style="font-weight:700;">28%</span></div><div class="bar-bg"><div class="bar-fill" id="txARBar" style="width:28%;background:#dc2626;"></div></div></div>
+    <div style="font-size:11px;color:#64748b;margin-top:6px;">Collection agency engaged. Legacy vendor issue — tracking recovery.</div>
+  </div>
+
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid #f1f5f9;">
+    <div class="section-sub">RCM Metrics (30-Day Rolling)</div>
+    <div class="mrow"><div class="mrow-label">NCR — Florida</div><div style="text-align:right"><div class="mrow-val c-yellow">43%</div><div class="mrow-delta c-gray">Billed at 200% Medicare</div></div></div>
+    <div class="mrow"><div class="mrow-label">NCR — Texas</div><div style="text-align:right"><div class="mrow-val c-yellow">36%</div><div class="mrow-delta c-gray">Billed at 200% Medicare</div></div></div>
+    <div class="mrow"><div class="mrow-label">Days in A/R — Florida</div><div style="text-align:right"><div class="mrow-val c-green">39.9</div><div class="mrow-delta c-gray">Target &lt;45</div></div></div>
+    <div class="mrow"><div class="mrow-label">Days in A/R — Texas</div><div style="text-align:right"><div class="mrow-val c-green">32.3</div><div class="mrow-delta c-gray">Target &lt;45</div></div></div>
+    <div class="mrow"><div class="mrow-label">Denial Rate</div><div style="text-align:right"><div class="mrow-val c-gray" id="denialRate">—</div><div class="mrow-delta c-red" style="font-size:10px;">⏳ Pending Sandy / Maribel</div></div></div>
+    <div class="mrow"><div class="mrow-label">Charge Lag (avg days)</div><div style="text-align:right"><div class="mrow-val c-gray" id="chargeLag">—</div><div class="mrow-delta c-red" style="font-size:10px;">⏳ Pending Sandy / Maribel</div></div></div>
+  </div>
+</div>
+
+<!-- ═══ BOARD 3: CLINICAL QUALITY ═══ -->
+<div class="card">
+  <div class="board-label bl-clin">Board 3 — Clinical Quality</div>
+  <div class="card-title">Documentation &amp; Quality Metrics <span class="owner-tag">Weekly · Dr. Aneja · Dr. V. Reddy</span></div>
+
+  <div class="mrow">
+    <div><div class="mrow-label">H&amp;P within 24 hrs</div><div class="mrow-sub">Target ≥95% · All FL sites</div></div>
+    <div style="text-align:right"><div class="mrow-val c-gray" id="hpComp">—</div><div class="mrow-delta c-gray">Enter weekly</div></div>
+  </div>
+  <div class="mrow">
+    <div><div class="mrow-label">DC Summary within 48 hrs</div><div class="mrow-sub">Target ≥90% · Audit done 4/2</div></div>
+    <div style="text-align:right"><div class="mrow-val c-gray" id="dcComp">—</div></div>
+  </div>
+
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid #f1f5f9;">
+    <div class="section-sub">Average LOS by State</div>
+    <div class="mrow"><div class="mrow-label">Florida — All Sites</div><div style="text-align:right"><div class="mrow-val c-gray" id="losFL">—</div></div></div>
+    <div class="mrow"><div class="mrow-label">Texas — All Sites</div><div style="text-align:right"><div class="mrow-val c-gray" id="losTX">—</div></div></div>
+  </div>
+
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid #f1f5f9;">
+    <div class="section-sub" style="color:#dc2626;">⚠ Woodmont Watch</div>
+    <div class="mrow"><div class="mrow-label">Woodmont LOS Trend</div><div style="text-align:right"><div class="mrow-val c-gray" id="woodLOS">—</div></div></div>
+    <div style="font-size:11px;color:#64748b;margin-top:6px;line-height:1.6;">Dr. Franklyn PIP active under Dr. Aneja. Site visit 4/8 completed. Monitoring LOS trend weekly.</div>
+  </div>
+
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid #f1f5f9;">
+    <div class="section-sub">Credentialing</div>
+    <div class="mrow">
+      <div><div class="mrow-label">Credentials Expiring &lt;90 Days</div><div class="mrow-sub">Owner: Crystal</div></div>
+      <div style="text-align:right"><div class="mrow-val c-gray" id="credExp">—</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ BOARD 4: PEOPLE & PIPELINE ═══ -->
+<div class="card">
+  <div class="board-label bl-people">Board 4 — People &amp; Pipeline</div>
+  <div class="card-title">Headcount &amp; Recruiting <span class="owner-tag">Weekly · Andrea Simon · Crystal Anderson</span></div>
+
+  <div class="mrow">
+    <div><div class="mrow-label">Total Open Positions</div><div class="mrow-sub">All sites — FL &amp; TX</div></div>
+    <div style="text-align:right"><div class="mrow-val c-yellow" id="totalOpen">—</div></div>
+  </div>
+  <div class="mrow">
+    <div><div class="mrow-label">Providers Below FMV</div><div class="mrow-sub">Comp review in Phase 2</div></div>
+    <div style="text-align:right"><div class="mrow-val c-red">61</div></div>
+  </div>
+  <div class="mrow">
+    <div><div class="mrow-label">Turnover — Rolling 90-Day</div><div class="mrow-sub">Owner: Andrea</div></div>
+    <div style="text-align:right"><div class="mrow-val c-gray" id="turnover">—</div></div>
+  </div>
+
+  <div style="margin-top:14px;padding-top:12px;border-top:1px solid #f1f5f9;">
+    <div class="section-sub">Open Positions by Site</div>
+    <table id="openPosTable"></table>
+  </div>
+</div>
+
+</div><!-- end grid -->
+<div class="footer" id="footerTxt">Enter today's data using the button above · Data saves in your browser</div>
+
+<!-- ═══ MODAL ═══ -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h2>⚙ Enter Today's Data</h2>
+    <div class="modal-note">Fill in what you have — leave blank anything you don't. Hit Save when done.</div>
+
+    <div class="modal-section"><h3>🏥 Florida — Today's Census by Site</h3><div class="modal-grid" id="m_censusFL"></div></div>
+    <div class="modal-section"><h3>🏥 Florida — Open Shifts by Site</h3><div class="modal-grid" id="m_shiftsFL"></div></div>
+    <div class="modal-section"><h3>🏥 Texas — Today's Census by Site</h3><div class="modal-grid" id="m_censusTX"></div></div>
+    <div class="modal-section">
+      <h3>💰 Finance / RCM</h3>
+      <div class="modal-grid">
+        <div class="field"><label>FL Daily Collections ($)</label><input type="number" id="m_flColl" placeholder="103769"></div>
+        <div class="field"><label>TX Daily Collections ($)</label><input type="number" id="m_txColl" placeholder="28127"></div>
+        <div class="field"><label>MTD FL Collections ($)</label><input type="number" id="m_mtd" placeholder=""></div>
+        <div class="field"><label>AR &gt;120 Days — FL (%)</label><input type="number" id="m_flAR" placeholder="25"></div>
+        <div class="field"><label>AR &gt;120 Days — TX (%)</label><input type="number" id="m_txAR" placeholder="28"></div>
+        <div class="field"><label>Denial Rate (%)</label><input type="number" id="m_denial" placeholder="Pending Sandy"></div>
+        <div class="field"><label>Charge Lag (avg days)</label><input type="number" id="m_lag" placeholder="Pending Maribel"></div>
+      </div>
+    </div>
+    <div class="modal-section">
+      <h3>🩺 Clinical Quality (Weekly)</h3>
+      <div class="modal-grid">
+        <div class="field"><label>H&amp;P within 24 hrs (%)</label><input type="number" id="m_hp" placeholder=""></div>
+        <div class="field"><label>DC Summary within 48 hrs (%)</label><input type="number" id="m_dc" placeholder=""></div>
+        <div class="field"><label>FL Avg LOS (days)</label><input type="number" step="0.1" id="m_losFL" placeholder=""></div>
+        <div class="field"><label>TX Avg LOS (days)</label><input type="number" step="0.1" id="m_losTX" placeholder=""></div>
+        <div class="field"><label>Woodmont LOS (days)</label><input type="number" step="0.1" id="m_woodLOS" placeholder=""></div>
+        <div class="field"><label>Credentials Expiring &lt;90 Days</label><input type="number" id="m_cred" placeholder=""></div>
+      </div>
+    </div>
+    <div class="modal-section">
+      <h3>👥 People &amp; Pipeline (Weekly)</h3>
+      <div class="modal-grid"><div class="field"><label>Turnover Rate — Rolling 90-Day (%)</label><input type="number" step="0.1" id="m_turnover" placeholder=""></div></div>
+      <div style="margin-top:12px;" class="section-sub">Open Positions by Site</div>
+      <div class="modal-grid" id="m_openPos"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-save" onclick="saveData()">💾 Save &amp; Update Dashboard</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const FL=[
+  {n:"Westside Regional",  md:"VACANT",              li:"Farzana Choudhry",  avg:265,mar:204.6,st:"vacant",ct:"12/31/2027",sub:2061326},
+  {n:"Woodmont Hospital",  md:"Dr. Franklyn (PIP)",  li:"Larissa Carvalho",  avg:169,mar:135.7,st:"pip",   ct:"12/31/2027",sub:2208849},
+  {n:"JFK Main Med Ctr",   md:"Dr. Susan Hanson",    li:"Claudia Chirino",   avg:262,mar:202.5,st:"ok",    ct:"08/31/2027",sub:3024261},
+  {n:"JFK North Med Ctr",  md:"Dr. Dario Martinez",  li:"—",                 avg:84, mar:88.9, st:"ok",    ct:"08/31/2027",sub:1131138},
+  {n:"Palms West Hospital",md:"Dr. Thomas Abraham",  li:"Alexandra Oliva",   avg:202,mar:138.5,st:"ok",    ct:"08/31/2027",sub:1190175},
+  {n:"University Hospital",md:"Dr. Ashkan Jafarbay", li:"—",                 avg:72, mar:54.0, st:"ok",    ct:"12/31/2027",sub:1055488},
+  {n:"Jackson Memorial",   md:"Dr. Esam Khalifa",    li:"Nemesis Nieves",    avg:126,mar:128.3,st:"ok",    ct:"04/04/2027",sub:971328},
+];
+const TX=[
+  {n:"Bay",        md:"Dr. Manzoor Bevinal",li:"—",              note:""},
+  {n:"Doctors",    md:"Dr. Manzoor Bevinal",li:"—",              note:""},
+  {n:"Huntsville", md:"Dr. Manzoor Bevinal",li:"Christina Perez",note:"⚠ Contract renewal — confirm date"},
+  {n:"Corpus",     md:"—",                  li:"Sage Turner",    note:"No MD listed"},
+];
+const ALL=[...FL.map(s=>({...s,state:'FL'})),...TX.map(s=>({...s,state:'TX'}))];
+const DTGT=147727,ARTH=15,HPT=95,DCT=90;
+
+let S=(()=>{try{const s=localStorage.getItem('hha_team_v1');if(s)return JSON.parse(s);}catch(e){}return{census:{},shifts:{},pos:Object.fromEntries(ALL.map(s=>[s.n,0])),flColl:103769,txColl:28127,mtd:null,flAR:25,txAR:28,denial:null,lag:null,hp:null,dc:null,losFL:null,losTX:null,woodLOS:null,cred:null,turnover:null,updated:null};})();
+function save(){localStorage.setItem('hha_team_v1',JSON.stringify(S));}
+
+function dol(v){return v!==null&&v!==undefined?'$'+Number(v).toLocaleString():'—';}
+function cls(v,t,hi=true){if(v===null||v===undefined)return 'c-gray';return hi?(v>=t?'c-green':v>=t*.9?'c-yellow':'c-red'):(v<=t?'c-green':v<=t*1.1?'c-yellow':'c-red');}
+function mdbadge(s){if(s==='pip')return '<span class="badge b-red">PIP Active</span>';if(s==='vacant')return '<span class="badge b-red">VACANT ⚠</span>';return '<span class="badge b-green">Active</span>';}
+
+function renderFL(){
+  let html='',tot=0,totA=0,totSh=0,below=0,hasc=false;
+  FL.forEach(s=>{
+    const c=S.census[s.n],sh=S.shifts[s.n];
+    let cc='—',vc='—';
+    if(c!==null&&c!==undefined&&c!==''){
+      hasc=true;const cv=Number(c);tot+=cv;totA+=s.avg;
+      const d=cv-s.avg,p=((d/s.avg)*100).toFixed(1);
+      const cl=cv<s.avg*.85?'c-red':cv<s.avg?'c-yellow':'c-green';
+      cc=`<span class="${cl}" style="font-weight:700;">${cv}</span>`;
+      vc=`<span class="${cl}">${d>=0?'+':''}${d} (${p}%)</span>`;
+      if(cv<s.avg)below++;
+    }
+    const shc=(sh!==null&&sh!==undefined&&sh!=='')?`<span class="${Number(sh)>0?'c-yellow':'c-green'}" style="font-weight:600;">${sh}</span>`:'—';
+    if(sh)totSh+=Number(sh);
+    html+=`<tr><td style="font-weight:600;white-space:nowrap;">${s.n}</td><td style="font-size:12px;white-space:nowrap;">${s.md}</td><td style="font-size:11px;color:#94a3b8;">${s.li}</td><td style="text-align:center;">${cc}</td><td style="text-align:center;color:#64748b;">${s.avg}</td><td style="text-align:center;color:#94a3b8;">${s.mar}</td><td style="text-align:center;">${vc}</td><td style="text-align:center;">${shc}</td><td style="font-size:11px;color:#64748b;white-space:nowrap;">${s.ct}</td><td style="font-size:11px;color:#64748b;">${'$'+(s.sub/1e6).toFixed(1)+'M/yr'}</td><td>${mdbadge(s.st)}</td></tr>`;
+  });
+  document.getElementById('flTableBody').innerHTML=html;
+  document.getElementById('flTotal').textContent=hasc?tot:'—';
+  const d=tot-totA;
+  document.getElementById('flTotalVs').textContent=hasc?(d>=0?'+':'')+d+' vs. 3-mo avg':'';
+  document.getElementById('flTotalVs').className='stat-sub '+(hasc?(d<0?'c-red':'c-green'):'');
+  document.getElementById('flShifts').textContent=hasc?totSh:'—';
+  document.getElementById('flBelow').textContent=hasc?below:'—';
+}
+function renderTX(){
+  let html='';
+  TX.forEach(s=>{
+    const c=S.census[s.n];
+    const cc=(c!==null&&c!==undefined&&c!=='')?`<span style="font-weight:700;">${c}</span>`:'—';
+    html+=`<tr><td style="font-weight:600;">${s.n}</td><td style="font-size:12px;">${s.md}</td><td style="font-size:11px;color:#94a3b8;">${s.li}</td><td style="text-align:center;">${cc}</td><td style="text-align:center;">—</td><td style="font-size:11px;color:${s.note.includes('⚠')?'#d97706':'#94a3b8'};">${s.note||'—'}</td><td>${s.md==='—'?'<span class="badge b-gray">No MD</span>':'<span class="badge b-blue">Active</span>'}</td></tr>`;
+  });
+  document.getElementById('txTableBody').innerHTML=html;
+}
+function renderFinance(){
+  const fl=S.flColl;
+  if(fl!==null){const d=fl-DTGT,cl=fl>=DTGT?'c-green':fl>=DTGT*.9?'c-yellow':'c-red';document.getElementById('flCollAmt').textContent=dol(fl);document.getElementById('flCollAmt').className='mrow-val '+cl;document.getElementById('flCollDelta').textContent=(d>=0?'▲ +$':'▼ $')+Math.abs(d).toLocaleString()+(d>=0?' above':' below')+' target';document.getElementById('flCollDelta').className='mrow-delta '+cl;}
+  if(S.txColl!==null)document.getElementById('txCollAmt').textContent=dol(S.txColl);
+  if(S.mtd!==null){document.getElementById('mtdCollAmt').textContent=dol(S.mtd);document.getElementById('mtdNote').textContent='';}
+  function setAR(pi,bi,v){if(v===null)return;const cl=v>ARTH?'c-red':'c-yellow';document.getElementById(pi).textContent=v+'%';document.getElementById(pi).className=cl;document.getElementById(bi).style.width=Math.min(v,60)+'%';document.getElementById(bi).style.background=v>ARTH?'#dc2626':'#d97706';}
+  setAR('flARPct','flARBar',S.flAR);setAR('txARPct','txARBar',S.txAR);
+  if(S.denial!==null){document.getElementById('denialRate').textContent=S.denial+'%';document.getElementById('denialRate').className='mrow-val '+(S.denial<10?'c-green':S.denial<15?'c-yellow':'c-red');}
+  if(S.lag!==null){document.getElementById('chargeLag').textContent=S.lag+' days';document.getElementById('chargeLag').className='mrow-val '+(S.lag<=2?'c-green':S.lag<=4?'c-yellow':'c-red');}
+}
+function renderClinical(){
+  function sm(id,v,t,u,hi){const el=document.getElementById(id);if(!el)return;if(v===null||v===undefined){el.textContent='—';el.className='mrow-val c-gray';return;}el.textContent=u==='%'?v+'%':v+' days';el.className='mrow-val '+cls(v,t,hi);}
+  sm('hpComp',S.hp,HPT,'%',true);sm('dcComp',S.dc,DCT,'%',true);
+  document.getElementById('losFL').textContent=S.losFL?S.losFL+' days':'—';
+  document.getElementById('losTX').textContent=S.losTX?S.losTX+' days':'—';
+  document.getElementById('woodLOS').textContent=S.woodLOS?S.woodLOS+' days':'—';
+  document.getElementById('credExp').textContent=S.cred!==null?S.cred:'—';
+}
+function renderPeople(){
+  document.getElementById('turnover').textContent=S.turnover!==null?S.turnover+'%':'—';
+  const tot=Object.values(S.pos).reduce((a,b)=>a+Number(b||0),0);
+  document.getElementById('totalOpen').textContent=tot;
+  document.getElementById('totalOpen').className='mrow-val '+(tot===0?'c-green':tot<=10?'c-yellow':'c-red');
+  let html='<thead><tr><th>Site</th><th>State</th><th style="text-align:center;">Open Positions</th></tr></thead><tbody>';
+  ALL.forEach(s=>{const p=Number(S.pos[s.n]||0);html+=`<tr><td style="font-weight:600;font-size:12px;">${s.n}</td><td style="color:#94a3b8;font-size:11px;">${s.state}</td><td style="text-align:center;" class="${p===0?'c-green':p<=2?'c-yellow':'c-red'}" style="font-weight:700;">${p}</td></tr>`;});
+  html+='</tbody>';document.getElementById('openPosTable').innerHTML=html;
+}
+function renderAll(){
+  document.getElementById('hdrDate').textContent=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  if(S.updated){document.getElementById('hdrUpdated').textContent='Last updated: '+S.updated;document.getElementById('footerTxt').textContent='Last updated: '+S.updated+' · Save this file to Desktop/HHA for daily use';}
+  renderFL();renderTX();renderFinance();renderClinical();renderPeople();
+}
+function buildModal(){
+  let flC='',flS='',txC='',pos='';
+  FL.forEach(s=>{
+    flC+=`<div class="field"><label>${s.n}</label><input type="number" id="ci_${s.n.replace(/\s/g,'_')}" placeholder="${s.avg} (3-mo avg)" value="${S.census[s.n]??''}"></div>`;
+    flS+=`<div class="field"><label>${s.n}</label><input type="number" id="si_${s.n.replace(/\s/g,'_')}" placeholder="0" value="${S.shifts[s.n]??''}"></div>`;
+    pos+=`<div class="field"><label>${s.n} (FL)</label><input type="number" id="pi_${s.n.replace(/\s/g,'_')}" placeholder="0" value="${S.pos[s.n]??0}"></div>`;
+  });
+  TX.forEach(s=>{
+    txC+=`<div class="field"><label>${s.n}</label><input type="number" id="ci_${s.n.replace(/\s/g,'_')}" placeholder="—" value="${S.census[s.n]??''}"></div>`;
+    pos+=`<div class="field"><label>${s.n} (TX)</label><input type="number" id="pi_${s.n.replace(/\s/g,'_')}" placeholder="0" value="${S.pos[s.n]??0}"></div>`;
+  });
+  document.getElementById('m_censusFL').innerHTML=flC;
+  document.getElementById('m_shiftsFL').innerHTML=flS;
+  document.getElementById('m_censusTX').innerHTML=txC;
+  document.getElementById('m_openPos').innerHTML=pos;
+  const map={flColl:'m_flColl',txColl:'m_txColl',mtd:'m_mtd',flAR:'m_flAR',txAR:'m_txAR',denial:'m_denial',lag:'m_lag',hp:'m_hp',dc:'m_dc',losFL:'m_losFL',losTX:'m_losTX',woodLOS:'m_woodLOS',cred:'m_cred',turnover:'m_turnover'};
+  Object.entries(map).forEach(([sk,ik])=>{const el=document.getElementById(ik);if(el&&S[sk]!==null&&S[sk]!==undefined)el.value=S[sk];});
+}
+function openModal(){buildModal();document.getElementById('modalOverlay').classList.add('open');}
+function closeModal(){document.getElementById('modalOverlay').classList.remove('open');}
+function saveData(){
+  ALL.forEach(s=>{
+    const k=s.n.replace(/\s/g,'_');
+    const cv=document.getElementById('ci_'+k)?.value;S.census[s.n]=(cv!==''&&cv!==undefined)?Number(cv):null;
+    if(s.state==='FL'){const sv=document.getElementById('si_'+k)?.value;S.shifts[s.n]=(sv!==''&&sv!==undefined)?Number(sv):null;}
+    const pv=document.getElementById('pi_'+k)?.value;S.pos[s.n]=(pv!==''&&pv!==undefined)?Number(pv):0;
+  });
+  const map={flColl:'m_flColl',txColl:'m_txColl',mtd:'m_mtd',flAR:'m_flAR',txAR:'m_txAR',denial:'m_denial',lag:'m_lag',hp:'m_hp',dc:'m_dc',losFL:'m_losFL',losTX:'m_losTX',woodLOS:'m_woodLOS',cred:'m_cred',turnover:'m_turnover'};
+  Object.entries(map).forEach(([sk,ik])=>{const el=document.getElementById(ik);S[sk]=(el&&el.value!=='')?Number(el.value):null;});
+  S.updated=new Date().toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+  save();closeModal();renderAll();
+}
+document.getElementById('modalOverlay').addEventListener('click',e=>{if(e.target===document.getElementById('modalOverlay'))closeModal();});
+renderAll();
+</script>
+</body>
+</html>
