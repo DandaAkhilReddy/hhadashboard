@@ -1,0 +1,68 @@
+name: hha-dashboard
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: hha-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hha}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hha}
+      POSTGRES_DB: ${POSTGRES_DB:-hha_dashboard}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-schemas.sql:/docker-entrypoint-initdb.d/01-schemas.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hha}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  adminer:
+    image: adminer:latest
+    container_name: hha-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha-dark
+
+  mailpit:
+    # Local SMTP catcher for alert digest testing — does NOT burn ACS quota
+    # UI: http://localhost:8025
+    image: axllent/mailpit:latest
+    container_name: hha-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+  azurite:
+    # Azure Blob Storage emulator for local dev
+    # Blob endpoint: http://localhost:10000/devstoreaccount1
+    # Default account / key baked in — DO NOT use in prod (prod = Managed Identity)
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: hha-azurite
+    restart: unless-stopped
+    command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck --loose"
+    ports:
+      - "10000:10000"
+    volumes:
+      - azurite_data:/data
+
+volumes:
+  postgres_data:
+    name: hha_postgres_data
+  azurite_data:
+    name: hha_azurite_data
