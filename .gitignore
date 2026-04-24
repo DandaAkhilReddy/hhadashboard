@@ -1,0 +1,82 @@
+# ---- Secrets / env ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+**/azure-credentials.json
+.azure/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.uv/
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+.vercel/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ---- IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+~$*
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Local DB / dumps ----
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+pg_dump_*.sql
+backups/
+
+# ---- Docker ----
+.docker/
+
+# ---- Bicep compiled artifacts ----
+infra/**/*.json
+!infra/**/*.bicepparam
+
+# ---- Claude Code local-only artifacts ----
+.claude-local/
+
+# ---- Playwright ----
+test-results/
+playwright-report/
+playwright/.cache/
