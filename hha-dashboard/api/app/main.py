@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from .core.logging import configure_logging, get_logger
 from .deps import engine, get_current_user
-from .routers import alerts, clinical, finance, operations, people, scorecards, sites, uploads
+from .routers import alerts, clinical, entries, finance, operations, people, scorecards, sites, uploads
 from .services import audit as audit_service
 from .settings import settings
 
@@ -98,3 +98,4 @@ app.include_router(people.router)
 app.include_router(scorecards.router)
 app.include_router(alerts.router)
 app.include_router(uploads.router)
+app.include_router(entries.router)
