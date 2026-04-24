@@ -179,6 +179,33 @@ export type UploadAccepted = {
   message: string;
 };
 
+// ---- Daily census entry (Crystal's form) ----
+
+export type DailyEntryIn = {
+  site_id: number;
+  census: number;
+  open_shifts: number;
+  notes?: string | null;
+};
+
+export type DailyCensusBatchIn = {
+  entry_date: string; // YYYY-MM-DD
+  rows: DailyEntryIn[];
+};
+
+export type DailyEntryOut = {
+  site_id: number;
+  site_name: string;
+  state: string;
+  entry_date: string;
+  census: number | null;
+  open_shifts: number;
+  entered_by_upn: string | null;
+  source: string | null;
+  notes: string | null;
+  updated_at: string | null;
+};
+
 // ---------- Fetch wrapper ----------
 
 async function get<T>(path: string): Promise<T> {
@@ -199,6 +226,21 @@ async function postFormData<T>(path: string, formData: FormData): Promise<T> {
     method: "POST",
     headers: { Authorization: "Dev admin" },
     body: formData,
+  });
+  if (!res.ok) {
+    throw new Error(`${path} → ${res.status}: ${await res.text()}`);
+  }
+  return (await res.json()) as T;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: "Dev admin",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     throw new Error(`${path} → ${res.status}: ${await res.text()}`);
@@ -240,6 +282,13 @@ export const api = {
     qs.set("limit", String(limit));
     return get<UploadRow[]>(`/api/v1/uploads?${qs.toString()}`);
   },
+
+  getDailyCensus: (date?: string): Promise<DailyEntryOut[]> => {
+    const qs = date ? `?date=${encodeURIComponent(date)}` : "";
+    return get<DailyEntryOut[]>(`/api/v1/entries/daily-census${qs}`);
+  },
+  saveDailyCensus: (batch: DailyCensusBatchIn): Promise<DailyEntryOut[]> =>
+    postJson<DailyEntryOut[]>("/api/v1/entries/daily-census", batch),
 };
 
 // Backwards-compat for Session 1 homepage
