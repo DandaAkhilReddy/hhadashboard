@@ -1,0 +1,93 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+**/azure-credentials.json
+.azure/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.env.local
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.vercel/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Generated types (regenerated from OpenAPI)
+# NOTE: lib/api-types.ts IS committed — it's the contract between api and web
+# web/lib/api-types.ts -- DO NOT UNCOMMENT
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# OS
+.DS_Store
+*.local
+
+# Logs
+*.log
+logs/
+
+# Local data / dumps
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+pg_dump_*.sql
+backups/
+
+# Docker
+.docker/
+
+# Bicep compiled artifacts (we commit .bicep, not .json)
+infra/**/*.json
+!infra/**/*.bicepparam
+
+# Claude Code artifacts (local-only notes)
+.claude-local/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# uv
+.uv/
+
+# OneDrive sync artifacts (if repo accidentally lives under OneDrive)
+*.tmp
+~$*
+desktop.ini
