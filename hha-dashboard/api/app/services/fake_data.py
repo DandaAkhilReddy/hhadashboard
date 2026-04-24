@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 
 # ----- Deterministic helpers -----
 
@@ -88,27 +91,63 @@ FL_MTD_TARGET = 3_250_000
 # ----- Operations -----
 
 
-def get_sites_today(today: date | None = None) -> list[dict]:
+def _fake_site_row(s: SiteSpec, today: date) -> tuple[int, int]:
+    """Deterministic (census, open_shifts) fallback when no DB entry exists."""
+    if s.state == "FL":
+        offset = _noise(("census", s.name, today.isoformat()), 0.15)
+        census = round(s.avg_census * (1 + offset) * 0.85)  # bias slightly low
+        # Hand-pinned per UI_MOCKUP_v5.html pain points
+        if s.name == "Westside Regional":
+            open_shifts = 3
+        elif s.name == "Palms West Hospital":
+            open_shifts = 2
+        elif s.name in ("University Hospital", "Jackson Memorial"):
+            open_shifts = 1
+        else:
+            open_shifts = 0
+    else:
+        census = s.avg_census + int(_noise(("census", s.name, today.isoformat()), 2))
+        open_shifts = 0
+    return census, open_shifts
+
+
+async def get_sites_today(
+    db: AsyncSession | None = None, today: date | None = None
+) -> list[dict]:
+    """Operations board row set for a given date.
+
+    Prefers real manual/PDF entries from `entries.daily_entries` over the fake
+    deterministic values. Sites with no entry for today fall back to fake, so
+    the board is always populated end-to-end even before Crystal has started
+    entering data.
+
+    `db` is optional so callers that don't have a session (e.g. the summary
+    aggregator) can still fall through to fully-fake output.
+    """
     today = today or date.today()
+
+    # Pull today's real entries once (if a session is provided)
+    by_site_name: dict[str, tuple[int, int]] = {}
+    if db is not None:
+        # Avoid circular import: models live in a sibling package
+        from ..models.entries import DailyEntry
+        from ..models.masters import Site
+
+        stmt = (
+            select(Site.name, DailyEntry.census, DailyEntry.open_shifts)
+            .join(DailyEntry, DailyEntry.site_id == Site.id)
+            .where(DailyEntry.entry_date == today)
+        )
+        result = await db.execute(stmt)
+        for name, census, open_shifts in result.all():
+            by_site_name[name] = (int(census), int(open_shifts or 0))
+
     rows = []
     for s in ALL_SITES:
-        if s.state == "FL":
-            offset = _noise(("census", s.name, today.isoformat()), 0.15)
-            census = round(s.avg_census * (1 + offset) * 0.85)  # bias slightly low
-            open_shifts = int(_seed("shifts", s.name, today.isoformat()) * 4)
-            # Westside has 3, Palms has 2, others 0-1
-            if s.name == "Westside Regional":
-                open_shifts = 3
-            elif s.name == "Palms West Hospital":
-                open_shifts = 2
-            elif s.name in ("University Hospital", "Jackson Memorial"):
-                open_shifts = 1
-            else:
-                open_shifts = 0
+        if s.name in by_site_name:
+            census, open_shifts = by_site_name[s.name]
         else:
-            # TX: small, fixed for demo consistency
-            census = s.avg_census + int(_noise(("census", s.name, today.isoformat()), 2))
-            open_shifts = 0
+            census, open_shifts = _fake_site_row(s, today)
 
         variance_pct = ((census - s.avg_census) / s.avg_census * 100) if s.avg_census else 0
 
@@ -129,9 +168,11 @@ def get_sites_today(today: date | None = None) -> list[dict]:
     return rows
 
 
-def get_operations_summary(today: date | None = None) -> dict:
+async def get_operations_summary(
+    db: AsyncSession | None = None, today: date | None = None
+) -> dict:
     today = today or date.today()
-    rows = get_sites_today(today)
+    rows = await get_sites_today(db, today)
     fl = [r for r in rows if r["state"] == "FL"]
     tx = [r for r in rows if r["state"] == "TX"]
     total_fl_census = sum(r["census_today"] for r in fl)
