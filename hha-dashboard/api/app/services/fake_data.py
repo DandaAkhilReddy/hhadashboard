@@ -21,7 +21,6 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
 # ----- Deterministic helpers -----
 
 

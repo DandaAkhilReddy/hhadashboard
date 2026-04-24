@@ -18,7 +18,7 @@ intentional: the human correction is the source of truth.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -51,7 +51,7 @@ async def get_daily_census(
     Stable sort by site name so the UI row order is consistent across reloads.
     """
     _ = user
-    the_date = target_date or datetime.now(timezone.utc).date()
+    the_date = target_date or datetime.now(UTC).date()
 
     # LEFT OUTER JOIN via two queries (asyncpg-friendly, avoids outerjoin mapping gotchas):
     #   1. Load all sites
@@ -125,14 +125,14 @@ async def save_daily_census(
             )
             .on_conflict_do_update(
                 index_elements=["site_id", "entry_date"],
-                set_=dict(
-                    census=row.census,
-                    open_shifts=row.open_shifts,
-                    entered_by_upn=user.upn,
-                    source="manual",
-                    notes=row.notes,
-                    updated_at=datetime.now(timezone.utc),
-                ),
+                set_={
+                    "census": row.census,
+                    "open_shifts": row.open_shifts,
+                    "entered_by_upn": user.upn,
+                    "source": "manual",
+                    "notes": row.notes,
+                    "updated_at": datetime.now(UTC),
+                },
             )
         )
         await db.execute(stmt)

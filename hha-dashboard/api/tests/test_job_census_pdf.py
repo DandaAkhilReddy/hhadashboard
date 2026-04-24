@@ -17,7 +17,7 @@ We use an AsyncMock session so we don't need Postgres running.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -40,7 +40,7 @@ def _mock_upload_row(upn: str = "crystal@hhamedicine.com") -> SimpleNamespace:
     return SimpleNamespace(
         blob_name="uploads/census_pdf/2026-04-24/foo.pdf",
         uploaded_by_upn=upn,
-        uploaded_at=datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc),
+        uploaded_at=datetime(2026, 4, 24, 12, 0, tzinfo=UTC),
     )
 
 
@@ -68,7 +68,7 @@ async def test_extractor_writes_one_row_per_matched_site() -> None:
         first_result = _mock_sites(sites)
         upsert_result = MagicMock()
 
-        async def execute_side_effect(*args, **kwargs):
+        async def execute_side_effect(*_args, **_kwargs):
             call_count["n"] += 1
             return first_result if call_count["n"] == 1 else upsert_result
 
@@ -104,7 +104,7 @@ async def test_extractor_drops_unknown_site_names() -> None:
     roster = _mock_sites(sites)
     upsert_result = MagicMock()
 
-    async def execute_side_effect(*args, **kwargs):
+    async def execute_side_effect(*_args, **_kwargs):
         call_count["n"] += 1
         return roster if call_count["n"] == 1 else upsert_result
 
