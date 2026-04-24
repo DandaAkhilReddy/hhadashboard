@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HHA Dashboard — Project Index</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; }
+  .card { transition: transform 0.12s, box-shadow 0.12s; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px -8px rgba(79, 70, 229, 0.25); border-color: #c7d2fe; }
+  .gradient-top { background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 60%, #4338ca 100%); }
+  .tag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+</style>
+</head>
+<body class="min-h-screen text-slate-800">
+
+<header class="gradient-top text-white">
+  <div class="max-w-[1400px] mx-auto px-6 py-10">
+    <div class="flex items-center gap-4 mb-4">
+      <div class="w-14 h-14 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center font-extrabold text-xl border border-white/20">
+        HHA
+      </div>
+      <div>
+        <h1 class="text-4xl font-bold tracking-tight">HHA Dashboard — Project Index</h1>
+        <p class="text-sm text-indigo-200 mt-1">
+          Everything in one place — planning docs, architecture, SharePoint setup, UI mockups, repo artifacts.
+        </p>
+      </div>
+    </div>
+    <div class="flex gap-3 text-xs flex-wrap">
+      <span class="tag bg-emerald-400/20 text-emerald-200 border border-emerald-400/30">● Azure-only</span>
+      <span class="tag bg-amber-400/20 text-amber-200 border border-amber-400/30">HIPAA-first</span>
+      <span class="tag bg-blue-400/20 text-blue-200 border border-blue-400/30">Next.js + FastAPI + Postgres</span>
+      <span class="tag bg-purple-400/20 text-purple-200 border border-purple-400/30">Solo build · Claude Code</span>
+      <span class="tag bg-rose-400/20 text-rose-200 border border-rose-400/30">Denials out of scope</span>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-[1400px] mx-auto px-6 py-10">
+
+  <!-- Section: core planning -->
+  <section class="mb-12">
+    <div class="flex items-end justify-between mb-4 border-b border-slate-200 pb-3">
+      <h2 class="text-2xl font-bold text-slate-900">📋 Plan &amp; scope</h2>
+      <p class="text-xs text-slate-500">Start here</p>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+
+      <a href="./docs.html?file=DASHBOARD_PLAN.md" class="card block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-indigo-100 text-indigo-800">Plan v5</span>
+          <span class="text-[10px] text-slate-400">~700 lines</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">Build Plan v5</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          The master plan — Azure-only, HIPAA-first, end-to-end. Scope, stack, phased roadmap,
+          session-level execution plans (1 &amp; 3), risks, business sponsorship.
+        </p>
+      </a>
+
+      <a href="./architecture.html" class="card block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-indigo-100 text-indigo-800">Architecture</span>
+          <span class="text-[10px] text-slate-400">~970 lines · specialized viewer</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">Architecture Deep Dive</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          Every component, every data flow. 5 planes (identity, app, data, integration, ops),
+          10 Azure services, 8 ASCII sequence diagrams, cost model.
+        </p>
+      </a>
+
+      <a href="./docs.html?file=hha-dashboard%2Fdocs%2Fadr%2F001-hipaa-data-classification.md" class="card block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-red-100 text-red-800">HIPAA</span>
+          <span class="text-[10px] text-slate-400">ADR-001</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">ADR-001: HIPAA Data Classification</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          The contract. 4-tier classification (A/B/C/D), full column-by-column matrix,
+          forbidden column names, BAA inventory, CI-enforced guard rails.
+        </p>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- Section: Ingestion pipeline (ACTIVE) -->
+  <section class="mb-12">
+    <div class="flex items-end justify-between mb-4 border-b border-slate-200 pb-3">
+      <h2 class="text-2xl font-bold text-slate-900">📥 Ingestion pipeline</h2>
+      <p class="text-xs text-slate-500">Upload → Azure Blob → 15-min cron → Postgres → Dashboard</p>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+
+      <a href="./docs.html?file=UPLOAD_PIPELINE_PLAN.md" class="card block bg-white border-2 border-indigo-300 rounded-xl p-5 no-underline ring-2 ring-indigo-100">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-indigo-600 text-white">Active · Session 3</span>
+          <span class="text-[10px] text-slate-400">~430 lines</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">Upload → Blob → Cron Pipeline</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          The active plan. Universal Drop Zone page in the dashboard → Azure Blob Storage →
+          15-min cron picks up unprocessed files → Document Intelligence / pandas →
+          Postgres → dashboard reflects within 15 min. 7-day auto-delete on Blob.
+        </p>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- Section: SharePoint (DEFERRED) -->
+  <section class="mb-12">
+    <div class="flex items-end justify-between mb-4 border-b border-slate-200 pb-3">
+      <h2 class="text-2xl font-bold text-slate-400">📂 SharePoint setup <span class="text-xs font-medium text-amber-700 bg-amber-100 px-2 py-0.5 rounded ml-2">DEFERRED</span></h2>
+      <p class="text-xs text-slate-500">Kept for future read-only repo (contracts / BAAs / historical Excel)</p>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2 opacity-70">
+
+      <a href="./docs.html?file=SHAREPOINT_PLAN.md" class="card block bg-slate-50 border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-amber-100 text-amber-800">Deferred</span>
+          <span class="text-[10px] text-slate-400">~365 lines</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-700 mb-1">SharePoint Plan</h3>
+        <p class="text-xs text-slate-500 leading-relaxed">
+          Team-site design for future read-only contracts + BAA repository.
+          PDF-drop-for-ingestion portion superseded by the Blob pipeline.
+        </p>
+      </a>
+
+      <a href="./docs.html?file=SHAREPOINT_DEEP_DIVE.md" class="card block bg-slate-50 border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-amber-100 text-amber-800">Deferred</span>
+          <span class="text-[10px] text-slate-400">~920 lines · technical</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-700 mb-1">SharePoint Deep Dive</h3>
+        <p class="text-xs text-slate-500 leading-relaxed">
+          Graph API code · Entra app reg · Purview labels/DLP/retention · PowerShell
+          provisioning. §2 + §3 + §4 still useful for the future contracts repo.
+        </p>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- Section: Communications -->
+  <section class="mb-12">
+    <div class="flex items-end justify-between mb-4 border-b border-slate-200 pb-3">
+      <h2 class="text-2xl font-bold text-slate-900">💬 Communications</h2>
+      <p class="text-xs text-slate-500">Vendor emails + project correspondence</p>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2">
+
+      <a href="./docs.html?file=VENTRA_REPLY_DRAFT.md" class="card block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-amber-100 text-amber-800">Draft</span>
+          <span class="text-[10px] text-slate-400">Ready to send</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">Ventra Reply (FL scope)</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          Response to Gilda Romero's BI/Data outreach. Florida-only. BAA scope +
+          data elements + Athena access path questions + meeting slots.
+        </p>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- Section: UI artifacts -->
+  <section class="mb-12">
+    <div class="flex items-end justify-between mb-4 border-b border-slate-200 pb-3">
+      <h2 class="text-2xl font-bold text-slate-900">🎨 UI artifacts</h2>
+      <p class="text-xs text-slate-500">Click to open in browser</p>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+
+      <a href="./UI_MOCKUP_v5.html" class="card block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-emerald-100 text-emerald-800">Live mockup</span>
+          <span class="text-[10px] text-slate-400">Interactive</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">UI Mockup v5 — click-through</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          Clickable dashboard mockup — 6 tabs (Overview / Operations / Finance / Clinical /
+          People / Scorecards) with real site data. Visual target for the real app.
+        </p>
+      </a>
+
+      <a href="./hha_team_dashboard.html" class="card block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-slate-200 text-slate-700">Reference</span>
+          <span class="text-[10px] text-slate-400">v1 prototype</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">Original HTML prototype (v1)</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          The original single-file HTML that anchored scope — 4 boards, 11 sites, manual
+          modal entry + localStorage. Kept for reference; everything else evolves from this.
+        </p>
+      </a>
+
+      <div class="card block bg-slate-50 border border-dashed border-slate-300 rounded-xl p-5">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-slate-200 text-slate-700">Live app</span>
+          <span class="text-[10px] text-slate-400">Session 2 scaffold</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">Real Next.js dashboard</h3>
+        <p class="text-xs text-slate-600 leading-relaxed mb-3">
+          Runs at <code class="bg-slate-200 px-1 py-0.5 rounded text-[11px]">localhost:3000</code>
+          once you do <code class="bg-slate-200 px-1 py-0.5 rounded text-[11px]">npm run dev</code>
+          in <code class="bg-slate-200 px-1 py-0.5 rounded text-[11px]">hha-dashboard/web/</code>.
+        </p>
+        <a href="http://localhost:3000" class="text-xs text-indigo-600 font-semibold no-underline hover:underline" target="_blank" rel="noopener">Open localhost:3000 →</a>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Section: Repo docs -->
+  <section class="mb-12">
+    <div class="flex items-end justify-between mb-4 border-b border-slate-200 pb-3">
+      <h2 class="text-2xl font-bold text-slate-900">💻 Repo documentation</h2>
+      <p class="text-xs text-slate-500"><code class="bg-slate-100 px-1.5 py-0.5 rounded text-[11px]">hha-dashboard/</code></p>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+
+      <a href="./docs.html?file=hha-dashboard%2FCLAUDE.md" class="card block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-violet-100 text-violet-800">Contract</span>
+          <span class="text-[10px] text-slate-400">~200 lines</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">CLAUDE.md</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          The contract every Claude Code session reads. Coding conventions, HIPAA rules,
+          forbidden operations, commit format, PR template. FL vs TX data split locked in.
+        </p>
+      </a>
+
+      <a href="./docs.html?file=hha-dashboard%2FREADME.md" class="card block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-sky-100 text-sky-800">README</span>
+          <span class="text-[10px] text-slate-400">Repo intro</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">Repo README</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          Quick-start, stack, scope in/out, HIPAA non-negotiables, testing, deploy commands.
+          What a new engineer reads first.
+        </p>
+      </a>
+
+      <a href="./docs.html?file=hha-dashboard%2FQUICKSTART.md" class="card block bg-white border border-slate-200 rounded-xl p-5 no-underline">
+        <div class="flex items-start justify-between mb-2">
+          <span class="tag bg-cyan-100 text-cyan-800">Quickstart</span>
+          <span class="text-[10px] text-slate-400">Local dev</span>
+        </div>
+        <h3 class="text-base font-bold text-slate-900 mb-1">QUICKSTART.md</h3>
+        <p class="text-xs text-slate-600 leading-relaxed">
+          Step-by-step to run the full stack locally. Critical OneDrive caveat
+          (move to <code class="bg-slate-100 px-1 py-0.5 rounded text-[10px]">C:/dev/</code> before npm/uv install).
+        </p>
+      </a>
+
+    </div>
+  </section>
+
+  <!-- Section: Quick tour -->
+  <section class="mb-12">
+    <div class="mb-4 border-b border-slate-200 pb-3">
+      <h2 class="text-2xl font-bold text-slate-900">🎓 First-time reader? Do this in order</h2>
+    </div>
+    <ol class="space-y-3">
+      <li class="flex items-start gap-4 bg-white border border-slate-200 rounded-xl p-4">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">1</span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold text-slate-900">
+            <a href="./docs.html?file=DASHBOARD_PLAN.md" class="text-indigo-600 hover:underline">Read Build Plan v5 — top to bottom</a>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">30 min. The master doc — scope, stack, phases. Everything else is a zoom-in.</div>
+        </div>
+      </li>
+      <li class="flex items-start gap-4 bg-white border border-slate-200 rounded-xl p-4">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">2</span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold text-slate-900">
+            <a href="./architecture.html" class="text-indigo-600 hover:underline">Skim Architecture</a> — especially §5 data flows
+          </div>
+          <div class="text-xs text-slate-500 mt-1">15 min. ASCII diagrams of every path: sign-in, dashboard read, manual entry, Paycom sync, Ventra ingest (PHI firewall).</div>
+        </div>
+      </li>
+      <li class="flex items-start gap-4 bg-white border border-slate-200 rounded-xl p-4">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">3</span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold text-slate-900">
+            <a href="./docs.html?file=hha-dashboard%2Fdocs%2Fadr%2F001-hipaa-data-classification.md" class="text-indigo-600 hover:underline">Read ADR-001 — the HIPAA rules</a>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">10 min. The non-negotiables. Four tiers. Forbidden column names. Why we never persist claim-level data.</div>
+        </div>
+      </li>
+      <li class="flex items-start gap-4 bg-white border border-slate-200 rounded-xl p-4">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">4</span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold text-slate-900">
+            <a href="./UI_MOCKUP_v5.html" class="text-indigo-600 hover:underline">Click through the UI mockup</a>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">10 min. See what the dashboard looks like — 6 tabs, real site names, realistic numbers.</div>
+        </div>
+      </li>
+      <li class="flex items-start gap-4 bg-white border border-slate-200 rounded-xl p-4">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">5</span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold text-slate-900">
+            <a href="./docs.html?file=hha-dashboard%2FQUICKSTART.md" class="text-indigo-600 hover:underline">Run the local stack</a>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">30 min. Docker + uv + npm. Crystal's 11 sites show up at localhost:3000, fetched from FastAPI.</div>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+</main>
+
+<footer class="max-w-[1400px] mx-auto px-6 pb-10 pt-6 text-xs text-slate-400 flex items-center justify-between border-t border-slate-200">
+  <span>HHA Medicine · Operations Dashboard · v5 (Azure-only, HIPAA-first)</span>
+  <span>Served locally at <code class="bg-slate-100 px-1.5 py-0.5 rounded">localhost:8765</code> · <code class="bg-slate-100 px-1.5 py-0.5 rounded">python -m http.server 8765</code></span>
+</footer>
+
+</body>
+</html>
