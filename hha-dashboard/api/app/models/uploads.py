@@ -24,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
-from .base import Base, DataClass
+from .base import BIGINT_PK, Base, DataClass
 
 A = DataClass.A.value
 B = DataClass.B.value
@@ -46,7 +46,7 @@ class UploadLog(Base):
         {"schema": "uploads"},
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, info={"data_class": A})
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, info={"data_class": A})
     uploaded_by_upn: Mapped[str] = mapped_column(
         String(200), nullable=False, info={"data_class": B}
     )
