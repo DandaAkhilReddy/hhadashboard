@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..deps import UserDep
+from ..deps import DBDep, UserDep
 from ..schemas.finance import ArAging, ArBuckets, FinanceKpis, FinanceToday, MonthRevenue
 from ..services import fake_data
 
@@ -8,9 +8,9 @@ router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 
 
 @router.get("/today", response_model=FinanceToday)
-async def finance_today(user: UserDep) -> dict:
+async def finance_today(db: DBDep, user: UserDep) -> dict:
     _ = user
-    return fake_data.get_finance_today()
+    return await fake_data.get_finance_today(db)
 
 
 def _buckets_to_schema(buckets: dict) -> ArBuckets:
@@ -24,9 +24,9 @@ def _buckets_to_schema(buckets: dict) -> ArBuckets:
 
 
 @router.get("/ar-aging", response_model=ArAging)
-async def ar_aging(user: UserDep) -> ArAging:
+async def ar_aging(db: DBDep, user: UserDep) -> ArAging:
     _ = user
-    raw = fake_data.get_ar_aging()
+    raw = await fake_data.get_ar_aging(db)
     return ArAging(
         fl_total_usd=raw["fl_total_usd"],
         fl_buckets=_buckets_to_schema(raw["fl_buckets"]),
@@ -40,9 +40,9 @@ async def ar_aging(user: UserDep) -> ArAging:
 
 
 @router.get("/kpis", response_model=FinanceKpis)
-async def finance_kpis(user: UserDep) -> dict:
+async def finance_kpis(db: DBDep, user: UserDep) -> dict:
     _ = user
-    return fake_data.get_finance_kpis()
+    return await fake_data.get_finance_kpis(db)
 
 
 @router.get("/monthly-trend", response_model=list[MonthRevenue])

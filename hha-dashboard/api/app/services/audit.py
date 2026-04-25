@@ -42,6 +42,7 @@ AUDITED_TABLES: frozenset[tuple[str, str]] = frozenset(
         ("masters", "credentials"),
         ("masters", "site_coverage"),
         ("entries", "daily_entries"),
+        ("entries", "monthly_finance_manual"),
     }
 )
 

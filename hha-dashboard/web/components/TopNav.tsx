@@ -12,6 +12,7 @@ const TABS = [
   { href: "/people", label: "People" },
   { href: "/scorecards", label: "Doctor Scorecards", badge: "exec-only" },
   { href: "/daily-census", label: "Enter Census", badge: "owners" },
+  { href: "/monthly-finance", label: "Enter Finance", badge: "owners" },
   { href: "/uploads", label: "Upload Files", badge: "owners" },
 ];
 

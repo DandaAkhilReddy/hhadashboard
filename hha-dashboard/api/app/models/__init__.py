@@ -10,6 +10,15 @@ every model module explicitly so the whole schema is visible to the check.
 from .audit import AuditLog
 from .base import Base, DataClass, TimestampMixin
 from .entries import DailyEntry
+from .entries_finance import MonthlyFinanceManual
 from .uploads import UploadLog
 
-__all__ = ["AuditLog", "Base", "DailyEntry", "DataClass", "TimestampMixin", "UploadLog"]
+__all__ = [
+    "AuditLog",
+    "Base",
+    "DailyEntry",
+    "DataClass",
+    "MonthlyFinanceManual",
+    "TimestampMixin",
+    "UploadLog",
+]

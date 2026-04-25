@@ -245,24 +245,81 @@ async def get_operations_summary(
 # ----- Finance (FL-first; TX is manual-entry stub) -----
 
 
-def get_finance_today(today: date | None = None) -> dict:
+async def _latest_finance_by_state(
+    db: AsyncSession, today: date
+) -> dict[str, dict]:
+    """Return {state: row_dict} for the most recent MonthlyFinanceManual entry
+    per state, in or before the current month. Empty dict if no rows.
+    """
+    from ..models.entries_finance import MonthlyFinanceManual
+
+    stmt = (
+        select(MonthlyFinanceManual)
+        .where(MonthlyFinanceManual.period_first <= today.replace(day=1))
+        .order_by(MonthlyFinanceManual.period_first.desc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    out: dict[str, dict] = {}
+    for r in rows:
+        if r.state in out:
+            continue  # we already have a newer row for this state
+        out[r.state] = {
+            "year": r.year,
+            "month": r.month,
+            "period_first": r.period_first,
+            "collections_usd": float(r.collections_usd),
+            "ventra_fee_usd": float(r.ventra_fee_usd),
+            "ar_total_usd": float(r.ar_total_usd),
+            "ar_buckets": {
+                "0-30": float(r.ar_0_30_usd),
+                "31-60": float(r.ar_31_60_usd),
+                "61-90": float(r.ar_61_90_usd),
+                "91-120": float(r.ar_91_120_usd),
+                ">120": float(r.ar_over_120_usd),
+            },
+            "ncr_pct": float(r.net_collection_rate_pct),
+            "days_in_ar": float(r.days_in_ar),
+            "source_system": r.source_system,
+        }
+    return out
+
+
+async def get_finance_today(
+    db: AsyncSession | None = None, today: date | None = None
+) -> dict:
+    """Daily collections + MTD totals.
+
+    Daily numbers stay deterministic-fake (we don't capture daily entries).
+    MTD totals prefer the most-recent monthly entry when one exists for the
+    current month — that's Sandy's authoritative figure for the period.
+    """
     today = today or date.today()
-    # FL: bias below target (matches the pain point)
+
+    # Deterministic daily slice (no manual daily entry exists)
     fl_today = int(FL_DAILY_TARGET * (0.65 + 0.15 * _seed("fl-coll", today.isoformat())))
     tx_today = int(TX_DAILY_TARGET * (1.05 + 0.15 * _seed("tx-coll", today.isoformat())))
 
-    # MTD: assume we're mid-month, ~70% of target
+    # MTD fallback (synthetic)
     day_of_month = today.day
     expected_mtd = FL_MTD_TARGET * (day_of_month / 30)
     fl_mtd = int(expected_mtd * (0.65 + 0.1 * _seed("fl-mtd", today.isoformat())))
-
     ventra_fee_mtd = round(fl_mtd * 0.05)
+    fl_source = "VENTRA_FL_FALLBACK"
+
+    # Prefer real entry for the current month if it exists
+    if db is not None:
+        latest = await _latest_finance_by_state(db, today)
+        fl = latest.get("FL")
+        if fl and fl["year"] == today.year and fl["month"] == today.month:
+            fl_mtd = int(fl["collections_usd"])
+            ventra_fee_mtd = int(fl["ventra_fee_usd"])
+            fl_source = fl["source_system"]
 
     return {
         "fl_daily_actual": fl_today,
         "fl_daily_target": FL_DAILY_TARGET,
         "fl_daily_delta": fl_today - FL_DAILY_TARGET,
-        "fl_source_system": "VENTRA_FL_FALLBACK",  # until P2 flips to VENTRA_FL_ATHENA
+        "fl_source_system": fl_source,
         "tx_daily_actual": tx_today,
         "tx_daily_target": TX_DAILY_TARGET,
         "tx_daily_delta": tx_today - TX_DAILY_TARGET,
@@ -274,10 +331,7 @@ def get_finance_today(today: date | None = None) -> dict:
     }
 
 
-def get_ar_aging(today: date | None = None) -> dict:
-    """5-bucket AR aging by state. Mirrors pain point: FL 25% > 120, TX 28% > 120."""
-    today = today or date.today()
-    # FL distribution
+def _fake_ar(today: date) -> dict:
     fl_total = 5_600_000 + int(_noise(("ar-fl", today.isoformat()), 200_000))
     fl_buckets = {
         "0-30": int(fl_total * 0.28),
@@ -297,22 +351,72 @@ def get_ar_aging(today: date | None = None) -> dict:
     return {
         "fl_total_usd": fl_total,
         "fl_buckets": fl_buckets,
-        "fl_over_120_pct": round(fl_buckets[">120"] / fl_total * 100, 1),
-        "fl_source_system": "VENTRA_FL_FALLBACK",
         "tx_total_usd": tx_total,
         "tx_buckets": tx_buckets,
-        "tx_over_120_pct": round(tx_buckets[">120"] / tx_total * 100, 1),
-        "tx_source_system": "HHA_TX_MANUAL",
     }
 
 
-def get_finance_kpis() -> dict:
+async def get_ar_aging(
+    db: AsyncSession | None = None, today: date | None = None
+) -> dict:
+    """5-bucket AR aging by state. Prefers DB row when present (per state)."""
+    today = today or date.today()
+    fake = _fake_ar(today)
+    fl_total = fake["fl_total_usd"]
+    fl_buckets = fake["fl_buckets"]
+    tx_total = fake["tx_total_usd"]
+    tx_buckets = fake["tx_buckets"]
+    fl_source = "VENTRA_FL_FALLBACK"
+    tx_source = "HHA_TX_MANUAL"
+
+    if db is not None:
+        latest = await _latest_finance_by_state(db, today)
+        if "FL" in latest:
+            fl_total = int(latest["FL"]["ar_total_usd"])
+            fl_buckets = {k: int(v) for k, v in latest["FL"]["ar_buckets"].items()}
+            fl_source = latest["FL"]["source_system"]
+        if "TX" in latest:
+            tx_total = int(latest["TX"]["ar_total_usd"])
+            tx_buckets = {k: int(v) for k, v in latest["TX"]["ar_buckets"].items()}
+            tx_source = latest["TX"]["source_system"]
+
     return {
-        "fl_days_in_ar": 39.9,
-        "tx_days_in_ar": 32.3,
+        "fl_total_usd": fl_total,
+        "fl_buckets": fl_buckets,
+        "fl_over_120_pct": round(fl_buckets[">120"] / fl_total * 100, 1) if fl_total else 0,
+        "fl_source_system": fl_source,
+        "tx_total_usd": tx_total,
+        "tx_buckets": tx_buckets,
+        "tx_over_120_pct": round(tx_buckets[">120"] / tx_total * 100, 1) if tx_total else 0,
+        "tx_source_system": tx_source,
+    }
+
+
+async def get_finance_kpis(
+    db: AsyncSession | None = None, today: date | None = None
+) -> dict:
+    """Days-in-AR + NCR per state. Prefers DB when entry exists."""
+    today = today or date.today()
+    fl_days_in_ar = 39.9
+    tx_days_in_ar = 32.3
+    fl_ncr = 43
+    tx_ncr = 36
+
+    if db is not None:
+        latest = await _latest_finance_by_state(db, today)
+        if "FL" in latest:
+            fl_days_in_ar = round(latest["FL"]["days_in_ar"], 1)
+            fl_ncr = round(latest["FL"]["ncr_pct"], 1)
+        if "TX" in latest:
+            tx_days_in_ar = round(latest["TX"]["days_in_ar"], 1)
+            tx_ncr = round(latest["TX"]["ncr_pct"], 1)
+
+    return {
+        "fl_days_in_ar": fl_days_in_ar,
+        "tx_days_in_ar": tx_days_in_ar,
         "days_in_ar_target": 45,
-        "fl_ncr_pct": 43,
-        "tx_ncr_pct": 36,
+        "fl_ncr_pct": fl_ncr,
+        "tx_ncr_pct": tx_ncr,
         "ncr_billed_at": "200% Medicare",
     }
 
