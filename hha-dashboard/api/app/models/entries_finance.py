@@ -49,7 +49,7 @@ class MonthlyFinanceManual(Base, TimestampMixin):
         CheckConstraint("year BETWEEN 2020 AND 2100", name="year_valid"),
         CheckConstraint("state IN ('FL', 'TX')", name="state_valid"),
         CheckConstraint(
-            "source_system IN ('VENTRA_FL_FALLBACK', 'HHA_TX_MANUAL')",
+            "source_system IN ('VENTRA_FL_ATHENA', 'VENTRA_FL_FALLBACK', 'HHA_TX_MANUAL')",
             name="source_system_valid",
         ),
         CheckConstraint("collections_usd >= 0", name="collections_non_negative"),

@@ -25,11 +25,21 @@ export function Badge({ variant = "gray", children }: { variant?: Variant; child
 }
 
 export function SourceTag({ source }: { source: string }) {
-  const label = source.includes("VENTRA")
-    ? "FL · Ventra"
-    : source.includes("HHA_TX_MANUAL")
-      ? "TX · manual"
-      : source;
-  const variant: Variant = source.includes("VENTRA") ? "blue" : "gray";
+  // Distinguish auto-ingested Ventra rows from Sandy's manual fallback so
+  // execs know whether the number came from the SFTP cron or a person typing.
+  const label =
+    source === "VENTRA_FL_ATHENA"
+      ? "FL · Ventra ✓ auto"
+      : source === "VENTRA_FL_FALLBACK"
+        ? "FL · Ventra (manual)"
+        : source === "HHA_TX_MANUAL"
+          ? "TX · manual"
+          : source;
+  const variant: Variant =
+    source === "VENTRA_FL_ATHENA"
+      ? "good"
+      : source === "VENTRA_FL_FALLBACK"
+        ? "warn"
+        : "gray";
   return <Badge variant={variant}>{label}</Badge>;
 }

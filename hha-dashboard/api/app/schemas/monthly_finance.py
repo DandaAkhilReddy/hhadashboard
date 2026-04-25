@@ -21,8 +21,9 @@ class StateCode(StrEnum):
 
 
 class SourceSystem(StrEnum):
-    VENTRA_FL_FALLBACK = "VENTRA_FL_FALLBACK"
-    HHA_TX_MANUAL = "HHA_TX_MANUAL"
+    VENTRA_FL_ATHENA = "VENTRA_FL_ATHENA"  # auto-ingested via Ventra SFTP / Athena
+    VENTRA_FL_FALLBACK = "VENTRA_FL_FALLBACK"  # Sandy's manual entry
+    HHA_TX_MANUAL = "HHA_TX_MANUAL"  # always manual — no Ventra TX
 
 
 # Reasonable upper bounds — bigger than any plausible HHA monthly value, small
