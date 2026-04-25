@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
+  type Session,
   decryptSession,
   encryptSession,
   isSessionExpired,
-  type Session,
 } from "@/lib/auth/session-crypto";
 
 beforeAll(() => {

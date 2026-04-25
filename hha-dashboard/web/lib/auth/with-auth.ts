@@ -17,10 +17,7 @@
 import { redirect } from "next/navigation";
 import { UnauthenticatedError } from "../errors";
 
-export async function fetchOrSignIn<T>(
-  fn: () => Promise<T>,
-  returnTo?: string,
-): Promise<T> {
+export async function fetchOrSignIn<T>(fn: () => Promise<T>, returnTo?: string): Promise<T> {
   try {
     return await fn();
   } catch (err) {

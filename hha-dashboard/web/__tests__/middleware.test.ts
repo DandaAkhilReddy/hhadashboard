@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORIGINAL_AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE;
 
@@ -21,6 +21,9 @@ beforeEach(() => {
 
 afterEach(() => {
   if (ORIGINAL_AUTH_MODE === undefined) {
+    // Plain `undefined` assignment coerces to the string "undefined" in
+    // process.env; delete is the only way to actually unset.
+    // biome-ignore lint/performance/noDelete: see comment above
     delete process.env.NEXT_PUBLIC_AUTH_MODE;
   } else {
     process.env.NEXT_PUBLIC_AUTH_MODE = ORIGINAL_AUTH_MODE;

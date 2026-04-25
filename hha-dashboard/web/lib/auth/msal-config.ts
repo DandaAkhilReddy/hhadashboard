@@ -6,10 +6,7 @@
  * AuthProvider then skips MsalProvider and the dev-stub takes over.
  */
 
-import {
-  type Configuration,
-  PublicClientApplication,
-} from "@azure/msal-browser";
+import { type Configuration, PublicClientApplication } from "@azure/msal-browser";
 
 export const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE ?? "dev";
 
@@ -31,9 +28,7 @@ let _initPromise: Promise<void> | null = null;
 
 function buildConfig(): Configuration {
   const redirectUri =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/auth/callback`
-      : "/auth/callback";
+    typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : "/auth/callback";
 
   return {
     auth: {

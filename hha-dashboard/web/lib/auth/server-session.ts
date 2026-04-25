@@ -14,8 +14,8 @@
  */
 
 import { cookies } from "next/headers";
-import { decryptSession, SESSION_COOKIE_NAME, isSessionExpired } from "./session-crypto";
 import { UnauthenticatedError } from "../errors";
+import { SESSION_COOKIE_NAME, decryptSession, isSessionExpired } from "./session-crypto";
 
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE ?? "dev";
 

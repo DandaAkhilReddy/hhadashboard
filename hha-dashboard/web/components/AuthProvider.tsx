@@ -9,11 +9,11 @@
  * will then return a "Dev admin" header function instead of an MSAL one.
  */
 
-import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { ensureMsalInitialized, getMsalInstance } from "@/lib/auth/msal-config";
 import { MsalProvider } from "@azure/msal-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ensureMsalInitialized, getMsalInstance } from "@/lib/auth/msal-config";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 function makeQueryClient(): QueryClient {
   return new QueryClient({

@@ -18,10 +18,8 @@
  * through the server-only module.
  */
 
-import { useCallback, useMemo } from "react";
 import { useMsal } from "@azure/msal-react";
-import { apiGet, apiPostFormData, apiPostJson, type GetAuthHeader } from "./api-fetch";
-import { apiScope, isMsalConfigured } from "./auth/msal-config";
+import { useCallback, useMemo } from "react";
 import type {
   ClinicalState,
   DailyCensusBatchIn,
@@ -40,6 +38,8 @@ import type {
   WeeklyHrIn,
   WeeklyHrOut,
 } from "./api-client";
+import { type GetAuthHeader, apiGet, apiPostFormData, apiPostJson } from "./api-fetch";
+import { apiScope, isMsalConfigured } from "./auth/msal-config";
 
 export type {
   ClinicalState,
@@ -79,8 +79,7 @@ export type BrowserApi = {
 
 function makeApi(getAuthHeader: GetAuthHeader): BrowserApi {
   const get = <T>(path: string) => apiGet<T>(path, getAuthHeader);
-  const postJson = <T>(path: string, body: unknown) =>
-    apiPostJson<T>(path, body, getAuthHeader);
+  const postJson = <T>(path: string, body: unknown) => apiPostJson<T>(path, body, getAuthHeader);
   const postFormData = <T>(path: string, fd: FormData) =>
     apiPostFormData<T>(path, fd, getAuthHeader);
 

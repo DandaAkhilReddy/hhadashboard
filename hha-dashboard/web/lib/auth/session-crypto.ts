@@ -58,17 +58,12 @@ async function getKey(): Promise<CryptoKey> {
     _keyPromise = (async () => {
       const raw = base64ToBytes(getSecret());
       if (raw.length !== 32) {
-        throw new Error(
-          `SESSION_SECRET must decode to 32 bytes (got ${raw.length})`,
-        );
+        throw new Error(`SESSION_SECRET must decode to 32 bytes (got ${raw.length})`);
       }
-      return crypto.subtle.importKey(
-        "raw",
-        raw,
-        { name: "AES-GCM" },
-        false,
-        ["encrypt", "decrypt"],
-      );
+      return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, [
+        "encrypt",
+        "decrypt",
+      ]);
     })();
   }
   return _keyPromise;
@@ -104,11 +99,7 @@ export async function decryptSession(blob: string): Promise<Session | null> {
     const iv = bytes.slice(0, 12);
     const ciphertext = bytes.slice(12);
     const key = await getKey();
-    const plaintext = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv },
-      key,
-      ciphertext,
-    );
+    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
     const json = TEXT_DECODER.decode(plaintext);
     const parsed = JSON.parse(json) as unknown;
     if (

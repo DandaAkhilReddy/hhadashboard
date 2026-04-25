@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { DELETE, POST } from "@/app/api/auth/session/route";
-import { decryptSession, SESSION_COOKIE_NAME } from "@/lib/auth/session-crypto";
+import { SESSION_COOKIE_NAME, decryptSession } from "@/lib/auth/session-crypto";
 
 beforeAll(() => {
   process.env.SESSION_SECRET = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
@@ -64,9 +64,7 @@ describe("POST /api/auth/session", () => {
   });
 
   it("rejects past expires_at with 400", async () => {
-    const res = await POST(
-      makeRequest("POST", { access_token: "x", expires_at: 1 }),
-    );
+    const res = await POST(makeRequest("POST", { access_token: "x", expires_at: 1 }));
     expect(res.status).toBe(400);
   });
 });
@@ -81,9 +79,7 @@ describe("DELETE /api/auth/session", () => {
   });
 
   it("rejects cross-origin DELETE with 403", async () => {
-    const res = await DELETE(
-      makeRequest("DELETE", undefined, "https://attacker.example.com"),
-    );
+    const res = await DELETE(makeRequest("DELETE", undefined, "https://attacker.example.com"));
     expect(res.status).toBe(403);
   });
 });

@@ -44,22 +44,18 @@ describe("apiGet", () => {
 
   it("throws UnauthenticatedError on 401", async () => {
     mockFetch({ status: 401, text: async () => "expired" });
-    await expect(
-      apiGet("/x", async () => "Bearer stale"),
-    ).rejects.toBeInstanceOf(UnauthenticatedError);
+    await expect(apiGet("/x", async () => "Bearer stale")).rejects.toBeInstanceOf(
+      UnauthenticatedError,
+    );
   });
 
   it("throws ForbiddenError on 403", async () => {
     mockFetch({ status: 403, text: async () => "no role" });
-    await expect(
-      apiGet("/x", async () => "Bearer ok"),
-    ).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(apiGet("/x", async () => "Bearer ok")).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it("throws ApiError on other 4xx/5xx", async () => {
     mockFetch({ status: 500, text: async () => "boom" });
-    await expect(
-      apiGet("/x", async () => "Bearer ok"),
-    ).rejects.toBeInstanceOf(ApiError);
+    await expect(apiGet("/x", async () => "Bearer ok")).rejects.toBeInstanceOf(ApiError);
   });
 });
