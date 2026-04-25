@@ -49,7 +49,7 @@ class WeeklyClinicalBatchIn(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _unique_states(self) -> "WeeklyClinicalBatchIn":
+    def _unique_states(self) -> WeeklyClinicalBatchIn:
         seen: set[StateCode] = set()
         for r in self.rows:
             if r.state in seen:
