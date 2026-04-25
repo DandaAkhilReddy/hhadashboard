@@ -23,15 +23,16 @@ API_DIR = Path(__file__).resolve().parent.parent.parent / "api"
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
+from sqlalchemy import text  # noqa: E402
+
 from app.deps import SessionLocal  # noqa: E402
-from app.services.audit import install_audit_listener, set_current_upn  # noqa: E402
 
 from .ingest import SERVICE_UPN, ingest_ventra_rows  # noqa: E402
 from .parser import parse_ventra_csv  # noqa: E402
 
-# Cron jobs don't go through FastAPI's lifespan — install the SQLAlchemy
-# audit event listener manually so every upsert produces an audit row.
-install_audit_listener()
+# Audit row writing is handled by Postgres triggers (migration 0007). Cron
+# jobs need to set the session GUC `audit.upn` to the service UPN before any
+# audited write so the trigger attributes correctly. See `run()` below.
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,9 +47,9 @@ async def run(csv_path: Path) -> int:
         log.error("File not found: %s", csv_path)
         return 1
 
-    text = csv_path.read_text(encoding="utf-8")
+    csv_text = csv_path.read_text(encoding="utf-8")
     try:
-        rows = parse_ventra_csv(text)
+        rows = parse_ventra_csv(csv_text)
     except Exception as e:
         log.error("Parse failed: %s", e)
         return 2
@@ -57,10 +58,14 @@ async def run(csv_path: Path) -> int:
         log.warning("No rows parsed from %s", csv_path)
         return 0
 
-    # Service UPN drives the audit attribution
-    set_current_upn(SERVICE_UPN)
-
     async with SessionLocal() as db:
+        # Set the audit GUC for this session — every audited mutation in this
+        # session will be attributed to ventra-ingest@hhamedicine.com via
+        # the Postgres trigger.
+        await db.execute(
+            text("SELECT set_config('audit.upn', :upn, false)"),
+            {"upn": SERVICE_UPN},
+        )
         result = await ingest_ventra_rows(db, rows)
 
     log.info("Done: upserted=%d skipped=%d", result.rows_upserted, len(result.skipped or []))

@@ -9,8 +9,10 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from .services.audit import current_upn
 from .settings import settings
 
 engine = create_async_engine(settings.database_url, echo=False, future=True, pool_pre_ping=True)
@@ -18,7 +20,25 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Yield an AsyncSession with the Postgres `audit.upn` GUC set.
+
+    The audit trigger (migration 0007) reads `audit.upn` to attribute every
+    INSERT/UPDATE/DELETE on audited tables. Setting it here means every
+    request-scoped DB session — and therefore every audited mutation — is
+    properly attributed regardless of which API path issued the SQL.
+
+    `set_config(name, value, false)` is session-scoped (sticky for the
+    connection until reset). Connection-pool reuse is fine because the next
+    `get_db` call always overwrites with the new request's UPN.
+    """
+    upn = current_upn.get()
     async with SessionLocal() as session:
+        # Set the GUC before yielding — first statement on the session,
+        # opens the implicit transaction with the right attribution context.
+        await session.execute(
+            text("SELECT set_config('audit.upn', :upn, false)"),
+            {"upn": upn},
+        )
         yield session
 
 
