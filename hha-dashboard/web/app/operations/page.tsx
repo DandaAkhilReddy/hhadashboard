@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Badge } from "@/components/Badge";
 import { Card, CardHeader } from "@/components/Card";
 import { MetricCard } from "@/components/MetricCard";
@@ -93,7 +94,11 @@ export default async function OperationsPage() {
                       : "text-amber-600";
                 return (
                   <tr key={s.name} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                    <td className="py-2.5 font-semibold text-slate-900">{s.name}</td>
+                    <td className="py-2.5 font-semibold text-slate-900">
+                      <Link href={`/operations/${s.id}`} className="hover:text-indigo-600 hover:underline">
+                        {s.name}
+                      </Link>
+                    </td>
                     <td className="py-2.5 text-xs">
                       {s.medical_director ? (
                         <span className="text-slate-700">
@@ -147,7 +152,11 @@ export default async function OperationsPage() {
             <tbody>
               {tx.map((s) => (
                 <tr key={s.name} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                  <td className="py-2.5 font-semibold text-slate-900">{s.name}</td>
+                  <td className="py-2.5 font-semibold text-slate-900">
+                    <Link href={`/operations/${s.id}`} className="hover:text-indigo-600 hover:underline">
+                      {s.name}
+                    </Link>
+                  </td>
                   <td className="py-2.5 text-xs text-slate-700">
                     {s.medical_director ?? <span className="text-slate-400">—</span>}
                   </td>
