@@ -46,7 +46,11 @@ def db_session():
     Base.metadata.create_all(engine)
     audit_service.install_audit_listener()
 
-    with Session(engine) as session:
+    # Match production: deps.py uses async_sessionmaker(expire_on_commit=False).
+    # With expire_on_commit=True (the default), attributes are unloaded after
+    # commit, and `load_history()` can't return the OLD value on the next
+    # UPDATE — so the audit diff loses the `old` half.
+    with Session(engine, expire_on_commit=False) as session:
         yield session
 
     engine.dispose()
