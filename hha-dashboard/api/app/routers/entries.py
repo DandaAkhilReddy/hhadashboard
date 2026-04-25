@@ -18,7 +18,7 @@ intentional: the human correction is the source of truth.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -27,6 +27,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..deps import CurrentUser, DBDep, require_role
 from ..models.entries import DailyEntry
+from ..models.entries_clinical import WeeklyClinical
 from ..models.entries_finance import MonthlyFinanceManual
 from ..models.masters import Site
 from ..schemas.entries import DailyCensusBatchIn, DailyEntryOut
@@ -36,6 +37,7 @@ from ..schemas.monthly_finance import (
     SourceSystem,
     StateCode,
 )
+from ..schemas.weekly_clinical import WeeklyClinicalBatchIn, WeeklyClinicalRowOut
 
 router = APIRouter(prefix="/api/v1/entries", tags=["entries"])
 
@@ -45,6 +47,9 @@ CensusOwnerDep = Annotated[CurrentUser, Depends(require_role("admin", "owner_ops
 
 # Sandy (owner_finance) + admin enter monthly finance.
 FinanceOwnerDep = Annotated[CurrentUser, Depends(require_role("admin", "owner_finance"))]
+
+# Aneja / Reddy (owner_clinical) + admin enter weekly clinical audits.
+ClinicalOwnerDep = Annotated[CurrentUser, Depends(require_role("admin", "owner_clinical"))]
 
 
 def _source_for_state(state: StateCode) -> SourceSystem:
@@ -274,6 +279,80 @@ async def save_monthly_finance(
                 MonthlyFinanceManual.year == batch.year,
                 MonthlyFinanceManual.month == batch.month,
                 MonthlyFinanceManual.state.in_([r.state.value for r in batch.rows]),
+            )
+        )
+    ).scalars().all()
+    return list(saved)
+
+
+# ---------- Weekly clinical ----------
+
+
+def _last_sunday(today: date) -> date:
+    """Return the most recent Sunday on or before `today`."""
+    return today - timedelta(days=(today.weekday() + 1) % 7)
+
+
+@router.get("/weekly-clinical", response_model=list[WeeklyClinicalRowOut])
+async def get_weekly_clinical(
+    db: DBDep,
+    user: ClinicalOwnerDep,
+    week_ending: Annotated[date | None, Query()] = None,
+) -> list[WeeklyClinical]:
+    """Return both states' rows for a given week_ending. Defaults to last Sunday."""
+    _ = user
+    target = week_ending or _last_sunday(datetime.now(UTC).date())
+
+    stmt = select(WeeklyClinical).where(WeeklyClinical.week_ending == target)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+@router.post(
+    "/weekly-clinical",
+    response_model=list[WeeklyClinicalRowOut],
+    status_code=status.HTTP_200_OK,
+)
+async def save_weekly_clinical(
+    db: DBDep,
+    user: ClinicalOwnerDep,
+    batch: WeeklyClinicalBatchIn,
+) -> list[WeeklyClinical]:
+    """Upsert each (week_ending, state) row in the batch."""
+    for row in batch.rows:
+        stmt = (
+            pg_insert(WeeklyClinical)
+            .values(
+                week_ending=batch.week_ending,
+                state=row.state.value,
+                hp_24h_pct=row.hp_24h_pct,
+                dc_48h_pct=row.dc_48h_pct,
+                avg_los_days=row.avg_los_days,
+                charts_audited_count=row.charts_audited_count,
+                notes=row.notes,
+                entered_by_upn=user.upn,
+            )
+            .on_conflict_do_update(
+                index_elements=["week_ending", "state"],
+                set_={
+                    "hp_24h_pct": row.hp_24h_pct,
+                    "dc_48h_pct": row.dc_48h_pct,
+                    "avg_los_days": row.avg_los_days,
+                    "charts_audited_count": row.charts_audited_count,
+                    "notes": row.notes,
+                    "entered_by_upn": user.upn,
+                    "updated_at": datetime.now(UTC),
+                },
+            )
+        )
+        await db.execute(stmt)
+    await db.commit()
+
+    saved = (
+        await db.execute(
+            select(WeeklyClinical).where(
+                WeeklyClinical.week_ending == batch.week_ending,
+                WeeklyClinical.state.in_([r.state.value for r in batch.rows]),
             )
         )
     ).scalars().all()
