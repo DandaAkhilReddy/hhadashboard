@@ -49,6 +49,53 @@ export type SiteDetail = SiteToday & {
   recent_entries: DailyEntryHistoryRow[];
 };
 
+// ---- Monthly finance entry (Sandy's form) ----
+
+export type FinanceState = "FL" | "TX";
+
+export type MonthlyFinanceRowIn = {
+  state: FinanceState;
+  collections_usd: string; // sent as Decimal-string
+  ventra_fee_usd?: string;
+  ar_total_usd: string;
+  ar_0_30_usd?: string;
+  ar_31_60_usd?: string;
+  ar_61_90_usd?: string;
+  ar_91_120_usd?: string;
+  ar_over_120_usd?: string;
+  net_collection_rate_pct: string;
+  days_in_ar: string;
+  notes?: string | null;
+};
+
+export type MonthlyFinanceBatchIn = {
+  year: number;
+  month: number;
+  rows: MonthlyFinanceRowIn[];
+};
+
+export type MonthlyFinanceRowOut = {
+  id: number;
+  year: number;
+  month: number;
+  period_first: string;
+  state: string;
+  collections_usd: string;
+  ventra_fee_usd: string;
+  ar_total_usd: string;
+  ar_0_30_usd: string;
+  ar_31_60_usd: string;
+  ar_61_90_usd: string;
+  ar_91_120_usd: string;
+  ar_over_120_usd: string;
+  net_collection_rate_pct: string;
+  days_in_ar: string;
+  source_system: string;
+  entered_by_upn: string;
+  notes: string | null;
+  updated_at: string;
+};
+
 export type OperationsSummary = {
   total_fl_census: number;
   total_tx_census: number;
@@ -306,6 +353,16 @@ export const api = {
   },
   saveDailyCensus: (batch: DailyCensusBatchIn): Promise<DailyEntryOut[]> =>
     postJson<DailyEntryOut[]>("/api/v1/entries/daily-census", batch),
+
+  getMonthlyFinance: (year?: number, month?: number): Promise<MonthlyFinanceRowOut[]> => {
+    const qs = new URLSearchParams();
+    if (year !== undefined) qs.set("year", String(year));
+    if (month !== undefined) qs.set("month", String(month));
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return get<MonthlyFinanceRowOut[]>(`/api/v1/entries/monthly-finance${suffix}`);
+  },
+  saveMonthlyFinance: (batch: MonthlyFinanceBatchIn): Promise<MonthlyFinanceRowOut[]> =>
+    postJson<MonthlyFinanceRowOut[]>("/api/v1/entries/monthly-finance", batch),
 };
 
 // Backwards-compat for Session 1 homepage
