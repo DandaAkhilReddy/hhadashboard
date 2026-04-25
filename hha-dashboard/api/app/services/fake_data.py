@@ -446,15 +446,71 @@ def get_monthly_revenue_trend() -> list[dict]:
 # ----- Clinical -----
 
 
-def get_clinical_summary(today: date | None = None) -> dict:
+async def _latest_clinical_by_state(
+    db: AsyncSession, today: date
+) -> dict[str, dict]:
+    """Return {state: row_dict} for the most recent WeeklyClinical entry per state
+    (week_ending on or before today). Empty dict if no rows.
+    """
+    from ..models.entries_clinical import WeeklyClinical
+
+    stmt = (
+        select(WeeklyClinical)
+        .where(WeeklyClinical.week_ending <= today)
+        .order_by(WeeklyClinical.week_ending.desc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    out: dict[str, dict] = {}
+    for r in rows:
+        if r.state in out:
+            continue
+        out[r.state] = {
+            "week_ending": r.week_ending,
+            "hp_24h_pct": float(r.hp_24h_pct),
+            "dc_48h_pct": float(r.dc_48h_pct),
+            "avg_los_days": float(r.avg_los_days),
+            "charts_audited_count": r.charts_audited_count,
+            "notes": r.notes,
+        }
+    return out
+
+
+async def get_clinical_summary(
+    db: AsyncSession | None = None, today: date | None = None
+) -> dict:
+    """Clinical board metrics. Prefers most-recent WeeklyClinical row per state."""
     today = today or date.today()
+
+    # Defaults — synthetic. Both states' H&P / DC averaged for the headline tiles.
+    fl_hp = round(94 + _seed("hp-fl", today.isoformat()) * 3, 1)
+    fl_dc = round(85 + _seed("dc-fl", today.isoformat()) * 5, 1)
+    tx_hp = round(94 + _seed("hp-tx", today.isoformat()) * 3, 1)
+    tx_dc = round(85 + _seed("dc-tx", today.isoformat()) * 5, 1)
+    los_fl_days: float = 4.2
+    los_tx_days: float = 3.9
+
+    if db is not None:
+        latest = await _latest_clinical_by_state(db, today)
+        if "FL" in latest:
+            fl_hp = round(latest["FL"]["hp_24h_pct"], 1)
+            fl_dc = round(latest["FL"]["dc_48h_pct"], 1)
+            los_fl_days = round(latest["FL"]["avg_los_days"], 2)
+        if "TX" in latest:
+            tx_hp = round(latest["TX"]["hp_24h_pct"], 1)
+            tx_dc = round(latest["TX"]["dc_48h_pct"], 1)
+            los_tx_days = round(latest["TX"]["avg_los_days"], 2)
+
+    # Headline tiles average across states (same shape as before)
+    hp_pct = round((fl_hp + tx_hp) / 2, 1)
+    dc_pct = round((fl_dc + tx_dc) / 2, 1)
+
     return {
-        "hp_24h_pct": round(94 + _seed("hp", today.isoformat()) * 3, 1),
+        "hp_24h_pct": hp_pct,
         "hp_24h_target": 95,
-        "dc_48h_pct": round(85 + _seed("dc", today.isoformat()) * 5, 1),
+        "dc_48h_pct": dc_pct,
         "dc_48h_target": 90,
-        "los_fl_days": 4.2,
-        "los_tx_days": 3.9,
+        "los_fl_days": los_fl_days,
+        "los_tx_days": los_tx_days,
         "los_woodmont_watch_days": 5.8,
         "los_woodmont_trend_days": 0.4,  # up over 4 weeks
         "credentials_expiring_30d": 4,
