@@ -17,6 +17,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.audit import AuditLog
 from app.models.entries_finance import MonthlyFinanceManual
 
 from .parser import VentraRow
@@ -108,6 +109,34 @@ async def ingest_ventra_rows(
             )
         )
         await db.execute(stmt)
+
+        # NOTE: pg_insert(...).on_conflict_do_update(...) is a Core-level
+        # statement that bypasses ORM's before_flush event. The audit listener
+        # in services/audit.py won't fire for it. Until that listener is
+        # upgraded to hook Core events (or replaced by a Postgres trigger),
+        # we write an explicit audit row here so Ventra ingestion is fully
+        # traceable. Same shape as what the listener would have produced.
+        audit_diff = {
+            "ingest": {
+                "year": r.year,
+                "month": r.month,
+                "state": STATE,
+                "collections_usd": str(r.collections_usd),
+                "ar_total_usd": str(r.ar_total_usd),
+                "source_system": SOURCE_SYSTEM,
+            }
+        }
+        db.add(
+            AuditLog(
+                table_schema="entries",
+                table_name="monthly_finance_manual",
+                row_pk=f"{r.year}-{r.month:02d}-{STATE}",
+                action="UPSERT",
+                diff=audit_diff,
+                changed_by_upn=service_upn,
+                changed_at=datetime.now(UTC),
+            )
+        )
         upserted += 1
 
     await db.commit()

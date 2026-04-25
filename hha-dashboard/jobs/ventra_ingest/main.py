@@ -24,10 +24,14 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 from app.deps import SessionLocal  # noqa: E402
-from app.services.audit import set_current_upn  # noqa: E402
+from app.services.audit import install_audit_listener, set_current_upn  # noqa: E402
 
 from .ingest import SERVICE_UPN, ingest_ventra_rows  # noqa: E402
 from .parser import parse_ventra_csv  # noqa: E402
+
+# Cron jobs don't go through FastAPI's lifespan — install the SQLAlchemy
+# audit event listener manually so every upsert produces an audit row.
+install_audit_listener()
 
 logging.basicConfig(
     level=logging.INFO,
