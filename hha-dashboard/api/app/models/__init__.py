@@ -12,6 +12,7 @@ from .base import Base, DataClass, TimestampMixin
 from .entries import DailyEntry
 from .entries_clinical import WeeklyClinical
 from .entries_finance import MonthlyFinanceManual
+from .entries_hr import WeeklyHrManual
 from .uploads import UploadLog
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "TimestampMixin",
     "UploadLog",
     "WeeklyClinical",
+    "WeeklyHrManual",
 ]
