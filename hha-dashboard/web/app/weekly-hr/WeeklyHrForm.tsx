@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { toast } from "@/components/Toast";
-import { api, type WeeklyHrOut } from "@/lib/api-client";
+import { useApiBrowser, type WeeklyHrOut } from "@/lib/api-browser";
 import { cn } from "@/lib/format";
 
 type Draft = {
@@ -85,6 +85,7 @@ export function WeeklyHrForm({
   initial: WeeklyHrOut | null;
 }) {
   const router = useRouter();
+  const api = useApiBrowser();
   const [weekEnding, setWeekEnding] = useState(initialWeekEnding);
   const [draft, setDraft] = useState<Draft>(fromOut(initial));
   const [saving, setSaving] = useState(false);

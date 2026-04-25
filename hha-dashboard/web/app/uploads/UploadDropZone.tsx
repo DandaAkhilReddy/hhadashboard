@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { FileDrop } from "@/components/FileDrop";
 import { toast } from "@/components/Toast";
-import { api, type FileType, type UploadRow } from "@/lib/api-client";
+import { useApiBrowser, type FileType, type UploadRow } from "@/lib/api-browser";
 import { cn } from "@/lib/format";
 
 // ---- Client-side filename → file_type inference ----
@@ -69,12 +69,15 @@ function humanBytes(n: number): string {
 
 export function UploadDropZone({ initialUploads }: { initialUploads: UploadRow[] }) {
   const router = useRouter();
+  const api = useApiBrowser();
   const [staged, setStaged] = useState<Staged[]>([]);
   const [uploads, setUploads] = useState<UploadRow[]>(initialUploads);
   const [uploading, setUploading] = useState(false);
   const nextLocalId = useRef(1);
 
-  // Poll for updates every 30 s
+  // Poll for updates every 30 s. `api` is memoized per active account so this
+  // effect re-binds only when the user changes (a re-init is the right thing
+  // there — tokens come from a different account).
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -85,7 +88,7 @@ export function UploadDropZone({ initialUploads }: { initialUploads: UploadRow[]
       }
     }, 30_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [api]);
 
   const onFilesDropped = useCallback((files: File[]) => {
     const newStaged = files.map<Staged>((f) => {
