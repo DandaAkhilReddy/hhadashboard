@@ -70,7 +70,42 @@ VALID_DEV_ROLES = {
 async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
 ) -> CurrentUser:
-    # Dev shortcut: Authorization: Dev <role>
+    """Resolve the current user. Three paths, in priority order:
+
+    1. **Real Entra JWT** — if `Authorization: Bearer <jwt>` AND Entra is
+       configured (tenant_id + api_client_id), verify against the tenant
+       JWKS and map group claims → roles.
+    2. **Dev stub** — if `ENV=dev` and `Authorization: Dev <role>`, return
+       a synthetic user with that single role.
+    3. **Dev default** — if `ENV=dev` and no header, return an admin
+       (convenience for browser-based local poking).
+
+    In prod with Entra unconfigured, requests without a valid JWT 401 out.
+    """
+    # ---- Path 1: Real JWT (preferred when Entra is configured) ----
+    if (
+        authorization
+        and authorization.startswith("Bearer ")
+        and settings.entra_configured
+    ):
+        # Local import keeps the verifier optional for tests that don't need it
+        from .services.entra_jwt import (
+            extract_roles,
+            extract_upn,
+            verify_access_token,
+        )
+
+        token = authorization.removeprefix("Bearer ").strip()
+        claims = await verify_access_token(token)
+        upn = extract_upn(claims)
+        roles = extract_roles(claims)
+        return CurrentUser(
+            upn=upn,
+            roles=roles,
+            comp_viewer="comp_viewer" in roles,
+        )
+
+    # ---- Path 2: Dev stub (only outside prod) ----
     if settings.env == "dev" and authorization and authorization.startswith("Dev "):
         role = authorization.removeprefix("Dev ").strip()
         if role not in VALID_DEV_ROLES:
@@ -84,11 +119,11 @@ async def get_current_user(
             comp_viewer=(role == "admin"),
         )
 
-    # Dev default — no header means "you are admin"
+    # ---- Path 3: Dev default ----
     if settings.env == "dev":
         return CurrentUser(upn="dev-default@local", roles={"admin"}, comp_viewer=True)
 
-    # TODO (Session 2): verify Entra JWT, extract groups → roles, extract comp_viewer flag
+    # Prod / non-dev with no valid token
     raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
 
 
