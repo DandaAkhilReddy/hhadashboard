@@ -59,7 +59,7 @@ class MonthlyFinanceBatchIn(BaseModel):
     rows: list[MonthlyFinanceRowIn] = Field(..., min_length=1, max_length=2)
 
     @model_validator(mode="after")
-    def _no_future_months_and_unique_states(self) -> "MonthlyFinanceBatchIn":
+    def _no_future_months_and_unique_states(self) -> MonthlyFinanceBatchIn:
         # Reject months entirely in the future (period start > today).
         period_first = date(self.year, self.month, 1)
         if period_first > date.today().replace(day=1):
