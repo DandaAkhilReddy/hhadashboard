@@ -74,6 +74,37 @@ export type MonthlyFinanceBatchIn = {
   rows: MonthlyFinanceRowIn[];
 };
 
+// ---- Weekly clinical entry (Aneja/Reddy's form) ----
+
+export type ClinicalState = "FL" | "TX";
+
+export type WeeklyClinicalRowIn = {
+  state: ClinicalState;
+  hp_24h_pct: string;
+  dc_48h_pct: string;
+  avg_los_days: string;
+  charts_audited_count: number;
+  notes?: string | null;
+};
+
+export type WeeklyClinicalBatchIn = {
+  week_ending: string; // YYYY-MM-DD (Sunday)
+  rows: WeeklyClinicalRowIn[];
+};
+
+export type WeeklyClinicalRowOut = {
+  id: number;
+  week_ending: string;
+  state: string;
+  hp_24h_pct: string;
+  dc_48h_pct: string;
+  avg_los_days: string;
+  charts_audited_count: number;
+  notes: string | null;
+  entered_by_upn: string;
+  updated_at: string;
+};
+
 export type MonthlyFinanceRowOut = {
   id: number;
   year: number;
@@ -363,6 +394,13 @@ export const api = {
   },
   saveMonthlyFinance: (batch: MonthlyFinanceBatchIn): Promise<MonthlyFinanceRowOut[]> =>
     postJson<MonthlyFinanceRowOut[]>("/api/v1/entries/monthly-finance", batch),
+
+  getWeeklyClinical: (weekEnding?: string): Promise<WeeklyClinicalRowOut[]> => {
+    const qs = weekEnding ? `?week_ending=${encodeURIComponent(weekEnding)}` : "";
+    return get<WeeklyClinicalRowOut[]>(`/api/v1/entries/weekly-clinical${qs}`);
+  },
+  saveWeeklyClinical: (batch: WeeklyClinicalBatchIn): Promise<WeeklyClinicalRowOut[]> =>
+    postJson<WeeklyClinicalRowOut[]>("/api/v1/entries/weekly-clinical", batch),
 };
 
 // Backwards-compat for Session 1 homepage
