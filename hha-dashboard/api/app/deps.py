@@ -9,15 +9,38 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session as SyncSession
 
+from .services.audit import current_upn
 from .settings import settings
 
 engine = create_async_engine(settings.database_url, echo=False, future=True, pool_pre_ping=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
+# Lazy GUC: when a session actually starts a transaction (= real work is
+# about to happen), copy the request's UPN contextvar into the Postgres
+# session GUC `audit.upn`. The audit trigger (migration 0007) reads this
+# to attribute every INSERT/UPDATE/DELETE on audited tables.
+#
+# Doing this on `after_begin` instead of at session-open avoids a DB hit
+# for routes that fail dependency resolution (e.g., 403 role gates, 422
+# Pydantic validation) before any SQL runs — keeps validation tests fast
+# and avoids asyncpg cross-loop cleanup issues in pytest-asyncio.
+@event.listens_for(SyncSession, "after_begin")
+def _set_audit_upn(_session: SyncSession, _transaction, connection) -> None:
+    upn = current_upn.get()
+    connection.execute(
+        text("SELECT set_config('audit.upn', :upn, false)"),
+        {"upn": upn},
+    )
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Yield an AsyncSession. Audit attribution wired via the `after_begin`
+    event listener above — fires the moment a real transaction starts."""
     async with SessionLocal() as session:
         yield session
 

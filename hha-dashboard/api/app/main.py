@@ -13,7 +13,17 @@ from sqlalchemy import text
 
 from .core.logging import configure_logging, get_logger
 from .deps import engine, get_current_user
-from .routers import alerts, clinical, entries, finance, operations, people, scorecards, sites, uploads
+from .routers import (
+    alerts,
+    clinical,
+    entries,
+    finance,
+    operations,
+    people,
+    scorecards,
+    sites,
+    uploads,
+)
 from .services import audit as audit_service
 from .settings import settings
 
@@ -21,9 +31,12 @@ log = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     configure_logging(settings.log_level)
-    audit_service.install_audit_listener()
+    # Audit row writing is handled by Postgres triggers (migration 0007), not
+    # an ORM listener. The middleware below sets the UPN contextvar; the
+    # `get_db` dep copies it into the Postgres GUC `audit.upn` for each
+    # session so triggers attribute correctly.
     log.info("api.startup", env=settings.env, log_level=settings.log_level)
     yield
     await engine.dispose()
@@ -53,9 +66,10 @@ if settings.env == "dev":
 
 # ---------- UPN contextvar middleware ----------
 #
-# The audit event listener reads the current user's UPN from a contextvars
-# ContextVar (services/audit.current_upn). We set it per request from the
-# authenticated user. Fallback '__system__' for health checks / unauth routes.
+# The Postgres audit trigger reads UPN from a session GUC `audit.upn` set in
+# `deps.get_db`. This middleware just keeps a Python contextvar in sync per
+# request so `get_db` can read it. Fallback '__system__' for health checks /
+# unauth routes.
 @app.middleware("http")
 async def set_current_upn_middleware(request: Request, call_next):
     upn = "__system__"

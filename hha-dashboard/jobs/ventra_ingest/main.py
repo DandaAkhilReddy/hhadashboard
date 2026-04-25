@@ -24,14 +24,15 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 from app.deps import SessionLocal  # noqa: E402
-from app.services.audit import install_audit_listener, set_current_upn  # noqa: E402
+from app.services.audit import set_current_upn  # noqa: E402
 
 from .ingest import SERVICE_UPN, ingest_ventra_rows  # noqa: E402
 from .parser import parse_ventra_csv  # noqa: E402
 
-# Cron jobs don't go through FastAPI's lifespan — install the SQLAlchemy
-# audit event listener manually so every upsert produces an audit row.
-install_audit_listener()
+# Audit attribution: setting the contextvar here propagates to the Postgres
+# `audit.upn` GUC via the `after_begin` SQLAlchemy event listener in
+# app/deps.py — so every audited mutation in this cron run is tagged
+# `ventra-ingest@hhamedicine.com` by the trigger function.
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,9 +47,9 @@ async def run(csv_path: Path) -> int:
         log.error("File not found: %s", csv_path)
         return 1
 
-    text = csv_path.read_text(encoding="utf-8")
+    csv_text = csv_path.read_text(encoding="utf-8")
     try:
-        rows = parse_ventra_csv(text)
+        rows = parse_ventra_csv(csv_text)
     except Exception as e:
         log.error("Parse failed: %s", e)
         return 2
@@ -57,9 +58,7 @@ async def run(csv_path: Path) -> int:
         log.warning("No rows parsed from %s", csv_path)
         return 0
 
-    # Service UPN drives the audit attribution
     set_current_upn(SERVICE_UPN)
-
     async with SessionLocal() as db:
         result = await ingest_ventra_rows(db, rows)
 
