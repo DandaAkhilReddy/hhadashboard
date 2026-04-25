@@ -32,6 +32,28 @@ class Settings(BaseSettings):
     entra_group_owner_clinical: str = ""
     entra_group_owner_hr: str = ""
 
+    @property
+    def entra_configured(self) -> bool:
+        """Real JWT verification is only attempted when both the tenant and
+        API audience are set. Otherwise we fall through to the dev stub
+        (`Authorization: Dev <role>`). Useful for local dev + tests where
+        full Azure setup isn't required."""
+        return bool(self.azure_tenant_id and self.azure_api_client_id)
+
+    def entra_group_to_role_map(self) -> dict[str, str]:
+        """Build {entra_group_object_id: role_name} from the configured group ids.
+        Empty entries are dropped — only mapped groups grant roles."""
+        mapping = {
+            self.entra_group_admin: "admin",
+            self.entra_group_exec: "exec",
+            self.entra_group_comp_viewer: "comp_viewer",
+            self.entra_group_owner_ops: "owner_ops",
+            self.entra_group_owner_finance: "owner_finance",
+            self.entra_group_owner_clinical: "owner_clinical",
+            self.entra_group_owner_hr: "owner_hr",
+        }
+        return {gid: role for gid, role in mapping.items() if gid}
+
     # ---------- Blob Storage (Session 3) ----------
     # Dev: Azurite → connection string below. Prod: Managed Identity → only account_url needed.
     azure_storage_account_url: str = "http://localhost:10000/devstoreaccount1"
