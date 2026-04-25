@@ -11,6 +11,7 @@ const TABS = [
   { href: "/clinical", label: "Clinical" },
   { href: "/people", label: "People" },
   { href: "/scorecards", label: "Doctor Scorecards", badge: "exec-only" },
+  { href: "/daily-census", label: "Enter Census", badge: "owners" },
   { href: "/uploads", label: "Upload Files", badge: "owners" },
 ];
 

@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ----- Deterministic helpers -----
 
@@ -88,50 +90,139 @@ FL_MTD_TARGET = 3_250_000
 # ----- Operations -----
 
 
-def get_sites_today(today: date | None = None) -> list[dict]:
-    today = today or date.today()
-    rows = []
-    for s in ALL_SITES:
-        if s.state == "FL":
-            offset = _noise(("census", s.name, today.isoformat()), 0.15)
-            census = round(s.avg_census * (1 + offset) * 0.85)  # bias slightly low
-            open_shifts = int(_seed("shifts", s.name, today.isoformat()) * 4)
-            # Westside has 3, Palms has 2, others 0-1
-            if s.name == "Westside Regional":
-                open_shifts = 3
-            elif s.name == "Palms West Hospital":
-                open_shifts = 2
-            elif s.name in ("University Hospital", "Jackson Memorial"):
-                open_shifts = 1
-            else:
-                open_shifts = 0
+def _fake_site_row(s: SiteSpec, today: date) -> tuple[int, int]:
+    """Deterministic (census, open_shifts) fallback when no DB entry exists."""
+    if s.state == "FL":
+        offset = _noise(("census", s.name, today.isoformat()), 0.15)
+        census = round(s.avg_census * (1 + offset) * 0.85)  # bias slightly low
+        # Hand-pinned per UI_MOCKUP_v5.html pain points
+        if s.name == "Westside Regional":
+            open_shifts = 3
+        elif s.name == "Palms West Hospital":
+            open_shifts = 2
+        elif s.name in ("University Hospital", "Jackson Memorial"):
+            open_shifts = 1
         else:
-            # TX: small, fixed for demo consistency
-            census = s.avg_census + int(_noise(("census", s.name, today.isoformat()), 2))
             open_shifts = 0
+    else:
+        census = s.avg_census + int(_noise(("census", s.name, today.isoformat()), 2))
+        open_shifts = 0
+    return census, open_shifts
 
-        variance_pct = ((census - s.avg_census) / s.avg_census * 100) if s.avg_census else 0
 
-        rows.append({
-            "name": s.name,
-            "state": s.state,
-            "medical_director": s.md_name,
-            "md_status": s.md_status,
-            "liaison": s.liaison,
-            "census_today": census,
-            "census_3mo_avg": s.avg_census,
-            "mtd_avg": s.mar_mtd,
-            "variance_pct": round(variance_pct, 1),
-            "open_shifts": open_shifts,
-            "contract_end": s.contract_end.isoformat(),
-            "annual_subsidy_usd": s.subsidy_usd,
-        })
+def _build_site_row(s: SiteSpec, site_id: int, census: int, open_shifts: int) -> dict:
+    """Compose a SiteToday-shaped dict from a SiteSpec + today's numbers."""
+    variance_pct = ((census - s.avg_census) / s.avg_census * 100) if s.avg_census else 0
+    return {
+        "id": site_id,
+        "name": s.name,
+        "state": s.state,
+        "medical_director": s.md_name,
+        "md_status": s.md_status,
+        "liaison": s.liaison,
+        "census_today": census,
+        "census_3mo_avg": s.avg_census,
+        "mtd_avg": s.mar_mtd,
+        "variance_pct": round(variance_pct, 1),
+        "open_shifts": open_shifts,
+        "contract_end": s.contract_end.isoformat(),
+        "annual_subsidy_usd": s.subsidy_usd,
+    }
+
+
+async def get_sites_today(
+    db: AsyncSession | None = None, today: date | None = None
+) -> list[dict]:
+    """Operations board row set for a given date.
+
+    Prefers real manual/PDF entries from `entries.daily_entries` over the fake
+    deterministic values. Sites with no entry for today fall back to fake.
+
+    `db` is optional. When `db` is None, ids fall back to a deterministic
+    1-based positional index (only matters for legacy non-DB paths).
+    """
+    today = today or date.today()
+
+    # Pull today's real entries + real site ids
+    name_to_id: dict[str, int] = {}
+    by_site_name: dict[str, tuple[int, int]] = {}
+    if db is not None:
+        from ..models.entries import DailyEntry
+        from ..models.masters import Site
+
+        site_rows = (await db.execute(select(Site.id, Site.name))).all()
+        for sid, name in site_rows:
+            name_to_id[name] = sid
+
+        stmt = (
+            select(Site.name, DailyEntry.census, DailyEntry.open_shifts)
+            .join(DailyEntry, DailyEntry.site_id == Site.id)
+            .where(DailyEntry.entry_date == today)
+        )
+        result = await db.execute(stmt)
+        for name, census, open_shifts in result.all():
+            by_site_name[name] = (int(census), int(open_shifts or 0))
+
+    rows = []
+    for i, s in enumerate(ALL_SITES, start=1):
+        if s.name in by_site_name:
+            census, open_shifts = by_site_name[s.name]
+        else:
+            census, open_shifts = _fake_site_row(s, today)
+        site_id = name_to_id.get(s.name, i)
+        rows.append(_build_site_row(s, site_id, census, open_shifts))
     return rows
 
 
-def get_operations_summary(today: date | None = None) -> dict:
+async def get_site_today(
+    db: AsyncSession, site_id: int, today: date | None = None
+) -> dict | None:
+    """Single-site variant of `get_sites_today`. Returns None if no such site."""
     today = today or date.today()
-    rows = get_sites_today(today)
+
+    from ..models.entries import DailyEntry
+    from ..models.masters import Site
+
+    site = (await db.execute(select(Site).where(Site.id == site_id))).scalar_one_or_none()
+    if site is None:
+        return None
+
+    spec = next((s for s in ALL_SITES if s.name == site.name), None)
+    if spec is None:
+        # Site exists in DB but has no SiteSpec (newly added site, not seeded into ALL_SITES).
+        # Build a minimal spec on the fly to avoid a hard failure.
+        spec = SiteSpec(
+            name=site.name,
+            state="FL" if site.state == "FL" else "TX",
+            avg_census=0,
+            mar_mtd=0.0,
+            contract_end=date.today(),
+            subsidy_usd=0,
+            md_name=None,
+            md_status="ACTIVE",
+            liaison=None,
+        )
+
+    entry = (
+        await db.execute(
+            select(DailyEntry.census, DailyEntry.open_shifts).where(
+                DailyEntry.site_id == site_id, DailyEntry.entry_date == today
+            )
+        )
+    ).first()
+    if entry is not None:
+        census, open_shifts = int(entry[0]), int(entry[1] or 0)
+    else:
+        census, open_shifts = _fake_site_row(spec, today)
+
+    return _build_site_row(spec, site.id, census, open_shifts)
+
+
+async def get_operations_summary(
+    db: AsyncSession | None = None, today: date | None = None
+) -> dict:
+    today = today or date.today()
+    rows = await get_sites_today(db, today)
     fl = [r for r in rows if r["state"] == "FL"]
     tx = [r for r in rows if r["state"] == "TX"]
     total_fl_census = sum(r["census_today"] for r in fl)
