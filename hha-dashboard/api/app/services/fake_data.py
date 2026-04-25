@@ -543,14 +543,48 @@ def get_credentials_expiring() -> list[dict]:
 # ----- People & Pipeline -----
 
 
-def get_people_summary() -> dict:
+async def get_people_summary(
+    db: AsyncSession | None = None, today: date | None = None
+) -> dict:
+    """People board headline tiles. Prefers most-recent WeeklyHrManual row."""
+    today = today or date.today()
+
+    # Defaults — synthetic, matching the HTML mockup
+    headcount_w2 = 48
+    headcount_1099 = 23
+    open_positions_total = 12
+    terminations_90d = 6
+    below_fmv = 61
+
+    if db is not None:
+        from ..models.entries_hr import WeeklyHrManual
+
+        stmt = (
+            select(WeeklyHrManual)
+            .where(WeeklyHrManual.week_ending <= today)
+            .order_by(WeeklyHrManual.week_ending.desc())
+            .limit(1)
+        )
+        row = (await db.execute(stmt)).scalar_one_or_none()
+        if row is not None:
+            headcount_w2 = row.headcount_w2
+            headcount_1099 = row.headcount_1099
+            open_positions_total = row.open_positions_total
+            terminations_90d = row.terminations_90d_count
+            below_fmv = row.below_fmv_count
+
+    headcount_total = headcount_w2 + headcount_1099
+    turnover_90d_pct = (
+        round(terminations_90d / headcount_total * 100, 1) if headcount_total else 0.0
+    )
+
     return {
-        "headcount_w2": 48,
-        "headcount_1099": 23,
-        "headcount_total": 71,
-        "open_positions_total": 12,
-        "turnover_90d_pct": 8.3,
-        "below_fmv_count": 61,
+        "headcount_w2": headcount_w2,
+        "headcount_1099": headcount_1099,
+        "headcount_total": headcount_total,
+        "open_positions_total": open_positions_total,
+        "turnover_90d_pct": turnover_90d_pct,
+        "below_fmv_count": below_fmv,
     }
 
 

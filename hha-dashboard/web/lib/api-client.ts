@@ -74,6 +74,31 @@ export type MonthlyFinanceBatchIn = {
   rows: MonthlyFinanceRowIn[];
 };
 
+// ---- Weekly HR entry (Andrea's form) ----
+
+export type WeeklyHrIn = {
+  week_ending: string; // YYYY-MM-DD (Sunday)
+  headcount_w2: number;
+  headcount_1099: number;
+  open_positions_total: number;
+  terminations_90d_count: number;
+  below_fmv_count: number;
+  notes?: string | null;
+};
+
+export type WeeklyHrOut = {
+  id: number;
+  week_ending: string;
+  headcount_w2: number;
+  headcount_1099: number;
+  open_positions_total: number;
+  terminations_90d_count: number;
+  below_fmv_count: number;
+  notes: string | null;
+  entered_by_upn: string;
+  updated_at: string;
+};
+
 // ---- Weekly clinical entry (Aneja/Reddy's form) ----
 
 export type ClinicalState = "FL" | "TX";
@@ -401,6 +426,13 @@ export const api = {
   },
   saveWeeklyClinical: (batch: WeeklyClinicalBatchIn): Promise<WeeklyClinicalRowOut[]> =>
     postJson<WeeklyClinicalRowOut[]>("/api/v1/entries/weekly-clinical", batch),
+
+  getWeeklyHr: (weekEnding?: string): Promise<WeeklyHrOut | null> => {
+    const qs = weekEnding ? `?week_ending=${encodeURIComponent(weekEnding)}` : "";
+    return get<WeeklyHrOut | null>(`/api/v1/entries/weekly-hr${qs}`);
+  },
+  saveWeeklyHr: (payload: WeeklyHrIn): Promise<WeeklyHrOut> =>
+    postJson<WeeklyHrOut>("/api/v1/entries/weekly-hr", payload),
 };
 
 // Backwards-compat for Session 1 homepage

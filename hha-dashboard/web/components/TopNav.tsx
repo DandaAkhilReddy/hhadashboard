@@ -14,6 +14,7 @@ const TABS = [
   { href: "/daily-census", label: "Enter Census", badge: "owners" },
   { href: "/monthly-finance", label: "Enter Finance", badge: "owners" },
   { href: "/weekly-clinical", label: "Enter Clinical", badge: "owners" },
+  { href: "/weekly-hr", label: "Enter HR", badge: "owners" },
   { href: "/uploads", label: "Upload Files", badge: "owners" },
 ];
 

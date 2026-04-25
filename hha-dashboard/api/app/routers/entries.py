@@ -29,6 +29,7 @@ from ..deps import CurrentUser, DBDep, require_role
 from ..models.entries import DailyEntry
 from ..models.entries_clinical import WeeklyClinical
 from ..models.entries_finance import MonthlyFinanceManual
+from ..models.entries_hr import WeeklyHrManual
 from ..models.masters import Site
 from ..schemas.entries import DailyCensusBatchIn, DailyEntryOut
 from ..schemas.monthly_finance import (
@@ -38,6 +39,7 @@ from ..schemas.monthly_finance import (
     StateCode,
 )
 from ..schemas.weekly_clinical import WeeklyClinicalBatchIn, WeeklyClinicalRowOut
+from ..schemas.weekly_hr import WeeklyHrIn, WeeklyHrOut
 
 router = APIRouter(prefix="/api/v1/entries", tags=["entries"])
 
@@ -50,6 +52,9 @@ FinanceOwnerDep = Annotated[CurrentUser, Depends(require_role("admin", "owner_fi
 
 # Aneja / Reddy (owner_clinical) + admin enter weekly clinical audits.
 ClinicalOwnerDep = Annotated[CurrentUser, Depends(require_role("admin", "owner_clinical"))]
+
+# Andrea (owner_hr) + admin enter weekly HR rollup.
+HrOwnerDep = Annotated[CurrentUser, Depends(require_role("admin", "owner_hr"))]
 
 
 def _source_for_state(state: StateCode) -> SourceSystem:
@@ -357,3 +362,72 @@ async def save_weekly_clinical(
         )
     ).scalars().all()
     return list(saved)
+
+
+# ---------- Weekly HR ----------
+
+
+@router.get("/weekly-hr", response_model=WeeklyHrOut | None)
+async def get_weekly_hr(
+    db: DBDep,
+    user: HrOwnerDep,
+    week_ending: Annotated[date | None, Query()] = None,
+) -> WeeklyHrManual | None:
+    """Return the row for a given week_ending. Defaults to last Sunday.
+
+    Returns null if no entry exists yet for that week — the form treats null
+    as a fresh form.
+    """
+    _ = user
+    target = week_ending or _last_sunday(datetime.now(UTC).date())
+
+    stmt = select(WeeklyHrManual).where(WeeklyHrManual.week_ending == target)
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
+@router.post(
+    "/weekly-hr",
+    response_model=WeeklyHrOut,
+    status_code=status.HTTP_200_OK,
+)
+async def save_weekly_hr(
+    db: DBDep,
+    user: HrOwnerDep,
+    payload: WeeklyHrIn,
+) -> WeeklyHrManual:
+    """Upsert one (week_ending) row."""
+    stmt = (
+        pg_insert(WeeklyHrManual)
+        .values(
+            week_ending=payload.week_ending,
+            headcount_w2=payload.headcount_w2,
+            headcount_1099=payload.headcount_1099,
+            open_positions_total=payload.open_positions_total,
+            terminations_90d_count=payload.terminations_90d_count,
+            below_fmv_count=payload.below_fmv_count,
+            notes=payload.notes,
+            entered_by_upn=user.upn,
+        )
+        .on_conflict_do_update(
+            index_elements=["week_ending"],
+            set_={
+                "headcount_w2": payload.headcount_w2,
+                "headcount_1099": payload.headcount_1099,
+                "open_positions_total": payload.open_positions_total,
+                "terminations_90d_count": payload.terminations_90d_count,
+                "below_fmv_count": payload.below_fmv_count,
+                "notes": payload.notes,
+                "entered_by_upn": user.upn,
+                "updated_at": datetime.now(UTC),
+            },
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+    saved = (
+        await db.execute(
+            select(WeeklyHrManual).where(WeeklyHrManual.week_ending == payload.week_ending)
+        )
+    ).scalar_one()
+    return saved

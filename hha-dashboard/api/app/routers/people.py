@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ..deps import UserDep
+from ..deps import DBDep, UserDep
 from ..schemas.people import OpenPositionBySite, PeopleSummary
 from ..services import fake_data
 
@@ -8,9 +8,9 @@ router = APIRouter(prefix="/api/v1/people", tags=["people"])
 
 
 @router.get("/summary", response_model=PeopleSummary)
-async def people_summary(user: UserDep) -> dict:
+async def people_summary(db: DBDep, user: UserDep) -> dict:
     _ = user
-    return fake_data.get_people_summary()
+    return await fake_data.get_people_summary(db)
 
 
 @router.get("/open-positions-by-site", response_model=list[OpenPositionBySite])
