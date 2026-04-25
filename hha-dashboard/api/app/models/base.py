@@ -1,9 +1,15 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, MetaData
+from sqlalchemy import BigInteger, DateTime, Integer, MetaData
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.sql import func
+
+
+# Cross-dialect BigInteger primary key. SQLite only auto-increments INTEGER PK
+# columns (not BIGINT), so the in-memory test DB falls back to plain Integer.
+# Postgres still gets a true bigint via the normal BigInteger path.
+BIGINT_PK = BigInteger().with_variant(Integer(), "sqlite")
 
 
 class DataClass(StrEnum):
