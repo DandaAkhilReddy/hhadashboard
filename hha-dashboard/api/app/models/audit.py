@@ -13,12 +13,16 @@ Tier C (forbidden anyway), the test_schema_classification CI guard blocks the PR
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, String, Text
+from sqlalchemy import JSON, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
-from .base import Base, DataClass
+from .base import BIGINT_PK, Base, DataClass
+
+# Cross-dialect JSON: JSONB on Postgres (production), generic JSON on SQLite
+# (in-memory tests). The Alembic migration still creates a real JSONB column.
+JSON_VARIANT = JSON().with_variant(JSONB(), "postgresql")
 
 B = DataClass.B.value
 
@@ -27,14 +31,14 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
     __table_args__ = {"schema": "audit"}
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, info={"data_class": B})
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, info={"data_class": B})
     table_schema: Mapped[str] = mapped_column(String(63), nullable=False, info={"data_class": B})
     table_name: Mapped[str] = mapped_column(String(63), nullable=False, info={"data_class": B})
     row_pk: Mapped[str] = mapped_column(String(200), nullable=False, info={"data_class": B})
     action: Mapped[str] = mapped_column(
         String(10), nullable=False, info={"data_class": B}
     )  # INSERT | UPDATE | DELETE
-    diff: Mapped[dict] = mapped_column(JSONB, nullable=False, info={"data_class": B})
+    diff: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, info={"data_class": B})
     changed_by_upn: Mapped[str] = mapped_column(
         String(200), nullable=False, info={"data_class": B}
     )
