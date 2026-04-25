@@ -19,6 +19,7 @@ export type Site = {
 };
 
 export type SiteToday = {
+  id: number;
   name: string;
   state: string;
   medical_director: string | null;
@@ -31,6 +32,21 @@ export type SiteToday = {
   open_shifts: number;
   contract_end: string;
   annual_subsidy_usd: number;
+};
+
+export type DailyEntryHistoryRow = {
+  entry_date: string;
+  census: number;
+  open_shifts: number;
+  entered_by_upn: string;
+  source: string;
+  notes: string | null;
+  updated_at: string | null;
+};
+
+export type SiteDetail = SiteToday & {
+  entered_today: boolean;
+  recent_entries: DailyEntryHistoryRow[];
 };
 
 export type OperationsSummary = {
@@ -253,6 +269,7 @@ export const api = {
 
   operationsSummary: () => get<OperationsSummary>("/api/v1/operations/summary"),
   sitesToday: () => get<SiteToday[]>("/api/v1/operations/sites-today"),
+  siteDetail: (siteId: number) => get<SiteDetail>(`/api/v1/operations/sites/${siteId}`),
 
   financeToday: () => get<FinanceToday>("/api/v1/finance/today"),
   arAging: () => get<ArAging>("/api/v1/finance/ar-aging"),
