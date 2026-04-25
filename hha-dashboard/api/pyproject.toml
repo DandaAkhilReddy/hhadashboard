@@ -55,6 +55,12 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Share one event loop across the whole test session so asyncpg connections
+# (created by the module-level engine in app.deps) can be cleaned up on the
+# loop they were opened on. Per-test loops cause RuntimeError: Event loop is
+# closed during asyncpg connection teardown.
+asyncio_default_test_loop_scope = "session"
+asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
 # "." = api/ (for app.*), ".." = hha-dashboard/ (for jobs.*)
 pythonpath = [".", ".."]

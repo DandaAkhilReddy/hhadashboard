@@ -13,7 +13,17 @@ from sqlalchemy import text
 
 from .core.logging import configure_logging, get_logger
 from .deps import engine, get_current_user
-from .routers import alerts, clinical, entries, finance, operations, people, scorecards, sites, uploads
+from .routers import (
+    alerts,
+    clinical,
+    entries,
+    finance,
+    operations,
+    people,
+    scorecards,
+    sites,
+    uploads,
+)
 from .services import audit as audit_service
 from .settings import settings
 
@@ -21,7 +31,7 @@ log = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     configure_logging(settings.log_level)
     # Audit row writing is handled by Postgres triggers (migration 0007), not
     # an ORM listener. The middleware below sets the UPN contextvar; the

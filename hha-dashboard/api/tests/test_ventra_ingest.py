@@ -157,30 +157,23 @@ async def test_ingest_custom_service_upn() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ingest_writes_audit_row_per_upsert() -> None:
-    """pg_insert + on_conflict_do_update is Core-level (bypasses ORM events).
-    The ingest service writes an explicit AuditLog row per upserted month so
-    the cron run is fully traceable in audit.audit_log.
+async def test_ingest_does_not_write_explicit_audit_row() -> None:
+    """Audit rows are written by the Postgres trigger (migration 0007), not
+    by the ingest service. The service must NOT call session.add() with an
+    AuditLog instance — that would produce duplicate rows.
     """
     from app.models.audit import AuditLog
 
     db = _mock_db()
-    rows = [_row(month=1), _row(month=2)]
+    rows = [_row()]
 
     await ingest_ventra_rows(db, rows)
 
-    # Inspect what got added via session.add — should be 2 AuditLog instances
-    added_audits = [
-        c.args[0] for c in db.add.call_args_list
-        if isinstance(c.args[0], AuditLog)
+    audit_adds = [
+        c for c in db.add.call_args_list
+        if c.args and isinstance(c.args[0], AuditLog)
     ]
-    assert len(added_audits) == 2
-
-    a = added_audits[0]
-    assert a.table_schema == "entries"
-    assert a.table_name == "monthly_finance_manual"
-    assert a.action == "UPSERT"
-    assert a.changed_by_upn == SERVICE_UPN
-    assert a.row_pk == "2026-01-FL"
-    assert a.diff["ingest"]["source_system"] == "VENTRA_FL_ATHENA"
-    assert a.diff["ingest"]["state"] == "FL"
+    assert audit_adds == [], (
+        "ingest_ventra_rows must not write AuditLog rows directly — the "
+        "Postgres trigger handles audit. Found explicit add() calls."
+    )
