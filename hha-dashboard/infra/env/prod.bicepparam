@@ -61,19 +61,18 @@ param enable_storage = true
 param storage_sku = 'Standard_RAGRS'
 param storage_soft_delete_retention_days = 90
 
-// Monitor — ON in prod. Required for HIPAA audit chain (Diagnostic Settings
-// route Postgres / App Service / Key Vault / Storage logs into the
-// workspace). 90-day retention; longer-term retention runs in the
-// Postgres audit_log table at the schema level. Workspace ingestion cost
-// scales with traffic — budget ~$50/mo for 5–10 user dashboards.
+// Monitor — ON in prod. Required for HIPAA audit chain.
 param enable_monitor = true
 param monitor_retention_days = 90
 
 // Email — ON in prod. ACS + Email Communications Service with an Azure
-// Managed Domain (sender DoNotReply@<random>.azurecomm.net). Daily 7am
-// digest + credential expiry alerts route through here. Custom domain
-// attachment (alerts@hhamedicine.com) is a follow-up.
+// Managed Domain. Custom domain attachment is a follow-up.
 param enable_email = true
+
+// Container Apps Jobs — ON in prod. Cron infrastructure for pg_backup
+// (nightly @ 03:00 UTC), with the rest joining as the corresponding job
+// images land. Consumption plan billing scales with execution time only.
+param enable_container_jobs = true
 
 // Entra IDs — populate from the prod app registrations.
 // Override at deploy time if these aren't yet committed.

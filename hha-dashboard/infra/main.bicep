@@ -120,6 +120,16 @@ param storage_soft_delete_retention_days int = 7
 @description('Enable Azure Communication Services (Email) for the daily 7am exec digest + credential expiry alerts. Uses an Azure Managed Domain in v0 (sender DoNotReply@<random>.azurecomm.net); custom domain attachment is a follow-up.')
 param enable_email bool = false
 
+@description('Enable Container Apps environment + the example pg_backup scheduled job. Other crons (paycom_sync, ventra_ingest, alert_digest, cred_scan) come as additional Job resources in follow-up PRs.')
+param enable_container_jobs bool = false
+
+@description('Container image for the pg_backup job. Default is a Microsoft sample; replace with a real image once an Azure Container Registry exists.')
+param pg_backup_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
+@secure()
+@description('Log Analytics workspace shared key for the Container Apps env appLogsConfiguration. Optional — when empty, container logs are not forwarded.')
+param log_analytics_shared_key string = ''
+
 @description('Microsoft Entra tenant id for Key Vault RBAC. Required when enable_keyvault is true.')
 param azure_tenant_id_for_kv string = ''
 
@@ -243,6 +253,25 @@ module acsEmail './modules/acs-email.bicep' = if (enable_email) {
   params: {
     acs_name: acs_name
     email_service_name: email_service_name
+    tags: tags
+  }
+}
+
+// Container Apps environment + example pg_backup scheduled job. The
+// other 4 crons (paycom_sync, ventra_ingest, alert_digest, cred_scan)
+// land as additional Job resources in follow-up PRs once a Container
+// Registry exists for their images. log_analytics_customer_id pulls
+// from monitor.outputs.workspace_customer_id when both flags are on,
+// so container env logs flow into the same workspace as everything
+// else; empty otherwise.
+module containerjobs './modules/containerjobs.bicep' = if (enable_container_jobs) {
+  name: 'containerjobs-deploy'
+  params: {
+    env_name_prefix: env_name
+    location: location
+    log_analytics_customer_id: enable_monitor ? monitor!.outputs.workspace_customer_id : ''
+    log_analytics_shared_key: log_analytics_shared_key
+    pg_backup_image: pg_backup_image
     tags: tags
   }
 }
@@ -607,3 +636,9 @@ output acs_endpoint string = enable_email ? acsEmail!.outputs.acs_endpoint : ''
 
 @description('Sender address from the Azure Managed Domain when enable_email is true; empty otherwise.')
 output acs_sender_address string = enable_email ? acsEmail!.outputs.sender_address : ''
+
+@description('Container Apps environment ID when enable_container_jobs is true; empty otherwise. Used to attach future Job resources (paycom_sync, alert_digest, etc).')
+output container_env_id string = enable_container_jobs ? containerjobs!.outputs.env_id : ''
+
+@description('pg_backup job principal ID (managed identity) when enable_container_jobs is true; empty otherwise. Wire to Storage Blob Data Contributor on the backups container in a follow-up.')
+output pg_backup_principal_id string = enable_container_jobs ? containerjobs!.outputs.pg_backup_principal_id : ''
