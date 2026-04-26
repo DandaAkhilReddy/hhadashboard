@@ -73,5 +73,24 @@ class Settings(BaseSettings):
         "text/csv",
     )
 
+    # ---------- Paycom workforce sync ----------
+    # API enablement was requested with a 4–6 wk window. Until access is
+    # granted, jobs/paycom_sync runs as a no-op stub when these are blank.
+    # When the credential lands, drop them into Key Vault and let App Service
+    # / the Container Apps Job env resolve them — same pattern as everything else.
+    paycom_api_base_url: str = ""
+    paycom_client_id: str = ""
+    paycom_client_secret: str = ""
+
+    @property
+    def paycom_configured(self) -> bool:
+        """True only when all three Paycom credentials are set. The cron job
+        treats False as 'API access not yet granted' and exits 0 cleanly."""
+        return bool(
+            self.paycom_api_base_url
+            and self.paycom_client_id
+            and self.paycom_client_secret
+        )
+
 
 settings = Settings()
