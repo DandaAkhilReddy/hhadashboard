@@ -120,10 +120,16 @@ async def get_current_user(
         )
 
     # ---- Path 3: Dev default ----
-    if settings.env == "dev":
+    # Belt-and-suspenders. The lifespan guard in app.main refuses to start
+    # when ENV != dev AND not entra_configured, so Path 3 is theoretically
+    # unreachable in prod. We still gate it on BOTH conditions so a
+    # configuration drift mid-deploy can't accidentally enable wide-open
+    # auth.
+    if settings.env == "dev" and not settings.entra_configured:
         return CurrentUser(upn="dev-default@local", roles={"admin"}, comp_viewer=True)
 
-    # Prod / non-dev with no valid token
+    # Prod / non-dev with no valid token, OR dev with Entra configured but
+    # no token presented — both cases require explicit auth.
     raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
 
 
