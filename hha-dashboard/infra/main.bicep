@@ -170,11 +170,29 @@ module keyvault './modules/keyvault.bicep' = if (enable_keyvault) {
   }
 }
 
-// Compose connection strings inline so the password never lives in the
-// postgres module's outputs (which are visible to RG Reader).
+// Compose connection strings.
+//
+// App Service resolves `@Microsoft.KeyVault(...)` references only when the
+// reference is the ENTIRE app_setting value, not a substring. So when KV is
+// on, the connection strings themselves are stored in KV (seeded by
+// bootstrap.sh as `database-url` + `database-url-sync` secrets), and
+// app_settings just reference those secrets. When KV is off, app_settings
+// gets the full literal string composed inline — Session 8 behavior.
+//
+// The literal-when-off path also serves as the deploy-time fallback: even
+// in prod, the FIRST deploy lands with KV on but the secrets unseeded; the
+// reference resolves to the literal `@Microsoft.KeyVault(...)` text and
+// App Service logs the failed lookup. The operator runs bootstrap.sh and
+// the next App Service restart picks up the resolved value.
 var pg_host = postgres.outputs.host
-var database_url = 'postgresql+asyncpg://${postgres_admin_login}:${postgres_admin_password}@${pg_host}:5432/${database_name}?ssl=require'
-var database_url_sync = 'postgresql+psycopg://${postgres_admin_login}:${postgres_admin_password}@${pg_host}:5432/${database_name}?sslmode=require'
+var database_url_literal = 'postgresql+asyncpg://${postgres_admin_login}:${postgres_admin_password}@${pg_host}:5432/${database_name}?ssl=require'
+var database_url_sync_literal = 'postgresql+psycopg://${postgres_admin_login}:${postgres_admin_password}@${pg_host}:5432/${database_name}?sslmode=require'
+var database_url = enable_keyvault
+  ? '@Microsoft.KeyVault(VaultName=${kv_name};SecretName=database-url)'
+  : database_url_literal
+var database_url_sync = enable_keyvault
+  ? '@Microsoft.KeyVault(VaultName=${kv_name};SecretName=database-url-sync)'
+  : database_url_sync_literal
 
 var common_app_settings = {
   ENV: env_name
@@ -221,7 +239,52 @@ module appservice './modules/appservice.bicep' = {
     worker_count: worker_count
     app_settings_web: web_app_settings
     app_settings_api: api_app_settings
+    app_subnet_id: enable_vnet ? vnet!.outputs.app_subnet_id : ''
     tags: tags
+  }
+}
+
+// ---------------------------------------------------------------------------
+// KV → App Service RBAC role assignments.
+//
+// Built-in role: Key Vault Secrets User
+// (4633458b-17de-408a-b874-0445c86b69e6). Both App Service MIs need this on
+// the vault for `@Microsoft.KeyVault(...)` references in app_settings to
+// resolve. Conditional on enable_keyvault — when KV is off there's nothing
+// to assign.
+//
+// Role assignment names use guid() of (vault_id, principal_id, role_id) so
+// they're deterministic and idempotent across re-deploys.
+// ---------------------------------------------------------------------------
+
+var kv_secrets_user_role_id = '4633458b-17de-408a-b874-0445c86b69e6'
+
+resource kvVaultExisting 'Microsoft.KeyVault/vaults@2024-04-01-preview' existing = if (enable_keyvault) {
+  name: kv_name
+}
+
+// Role-assignment NAMES use guid() seeded with deploy-start values
+// (vault id, app name, role id). The MI principalId is a deploy-time
+// output from the appservice module, which Bicep refuses inside name
+// (BCP120). Seeding the name with the app name is fine: it's unique
+// per (vault, app, role) tuple and stable across re-deploys.
+resource webKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enable_keyvault) {
+  scope: kvVaultExisting
+  name: guid(kv_name, web_name, kv_secrets_user_role_id)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kv_secrets_user_role_id)
+    principalId: appservice.outputs.web_principal_id
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource apiKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enable_keyvault) {
+  scope: kvVaultExisting
+  name: guid(kv_name, api_name, kv_secrets_user_role_id)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kv_secrets_user_role_id)
+    principalId: appservice.outputs.api_principal_id
+    principalType: 'ServicePrincipal'
   }
 }
 
