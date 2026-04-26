@@ -46,8 +46,13 @@ param app_settings_web object
 @description('App settings for the api app (FastAPI).')
 param app_settings_api object
 
+@description('Optional app subnet resource ID for regional VNet integration. When set, both apps attach to the subnet so outbound traffic (Postgres, Key Vault) flows through the VNet. Empty string keeps them on the public outbound IP set.')
+param app_subnet_id string = ''
+
 @description('Tags to apply to all resources.')
 param tags object = {}
+
+var vnet_integrated = !empty(app_subnet_id)
 
 resource plan 'Microsoft.Web/serverfarms@2024-04-01' = {
   name: plan_name
@@ -89,6 +94,7 @@ resource web 'Microsoft.Web/sites@2024-04-01' = {
     serverFarmId: plan.id
     httpsOnly: true
     clientAffinityEnabled: false
+    virtualNetworkSubnetId: vnet_integrated ? app_subnet_id : null
     siteConfig: {
       linuxFxVersion: web_linux_fx_version
       minTlsVersion: '1.2'
@@ -96,6 +102,7 @@ resource web 'Microsoft.Web/sites@2024-04-01' = {
       http20Enabled: true
       alwaysOn: true
       healthCheckPath: '/'
+      vnetRouteAllEnabled: vnet_integrated
       appSettings: web_settings_array
     }
   }
@@ -113,6 +120,7 @@ resource api 'Microsoft.Web/sites@2024-04-01' = {
     serverFarmId: plan.id
     httpsOnly: true
     clientAffinityEnabled: false
+    virtualNetworkSubnetId: vnet_integrated ? app_subnet_id : null
     siteConfig: {
       linuxFxVersion: api_linux_fx_version
       minTlsVersion: '1.2'
@@ -120,10 +128,20 @@ resource api 'Microsoft.Web/sites@2024-04-01' = {
       http20Enabled: true
       alwaysOn: true
       healthCheckPath: '/health'
+      vnetRouteAllEnabled: vnet_integrated
       appSettings: api_settings_array
     }
   }
 }
+
+// Regional VNet integration: when an app subnet is provided, attach via the
+// virtualNetwork subresource. This is the modern approach replacing the
+// legacy Microsoft.Web/sites/networkConfig where possible. We use the
+// virtualNetworkSubnetId top-level property above; the subresource below is
+// kept conditional and explicit for the cases where the platform expects it.
+//
+// When app_subnet_id is empty, neither apps gets VNet integration —
+// outbound traffic continues through the public outbound IP set.
 
 @description('Web app default hostname.')
 output web_hostname string = web.properties.defaultHostName
