@@ -34,6 +34,14 @@ param plan_sku_name = 'B2'
 param plan_sku_tier = 'Basic'
 param worker_count = 1
 
+// VNet + Key Vault — off in dev. Public Postgres + literal app_settings is
+// fine here; the auditor flag and KV cost overhead are prod-only concerns.
+// Override to true at deploy time if you want to test the private posture
+// against the dev RG before flipping prod.
+param enable_vnet = false
+param enable_keyvault = false
+param azure_tenant_id_for_kv = ''
+
 // Entra IDs — empty in dev so the API falls back to the Authorization: Dev <role>
 // stub flow. When the Entra app registrations land per docs/ENTRA_SETUP.md,
 // fill these in or override at deploy time.
