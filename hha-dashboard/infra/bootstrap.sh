@@ -147,16 +147,43 @@ Common first-time issue: KV reference shows up unresolved in the
   - vault network rules blocking the App Service VNet (check enable_vnet
     matches the deployed posture)
 
-Session 11 will add OIDC federated identity for GitHub Actions deploys.
-The one-time setup command is roughly:
+.github/workflows/deploy-${ENV}.yml runs az deployment via OIDC federated
+identity. One-time setup (run AS A TENANT/SUBSCRIPTION ADMIN, NOT this
+script):
 
-  # az ad app federated-credential create \\
-  #   --id <github-actions-app-id> \\
-  #   --parameters '{
-  #     "name": "github-${ENV}",
-  #     "issuer": "https://token.actions.githubusercontent.com",
-  #     "subject": "repo:DandaAkhilReddy/hhadashboard:ref:refs/heads/main",
-  #     "audiences": ["api://AzureADTokenExchange"]
-  #   }'
+  # 1. Create an Entra app for GitHub Actions to authenticate as
+  GITHUB_APP=\$(az ad app create --display-name 'github-actions-hha-dashboard' --query appId -o tsv)
+  az ad sp create --id \$GITHUB_APP
+
+  # 2. Grant Contributor on the resource group (limit-scope)
+  az role assignment create \\
+    --role Contributor \\
+    --scope \$(az group show -n $RG --query id -o tsv) \\
+    --assignee \$GITHUB_APP
+
+  # 3. Grant Key Vault Secrets Officer on the vault so deploys can seed
+  #    secrets via this script invoked from the runner
+  az role assignment create \\
+    --role 'Key Vault Secrets Officer' \\
+    --scope \$(az keyvault show -n $VAULT --query id -o tsv) \\
+    --assignee \$GITHUB_APP
+
+  # 4. Federated credential — branch ref binding
+  az ad app federated-credential create \\
+    --id \$GITHUB_APP \\
+    --parameters '{
+      "name": "github-deploy-${ENV}",
+      "issuer": "https://token.actions.githubusercontent.com",
+      "subject": "repo:DandaAkhilReddy/hhadashboard:ref:refs/heads/main",
+      "audiences": ["api://AzureADTokenExchange"]
+    }'
+
+  # 5. Set GitHub repository variables (Settings → Secrets and variables → Actions → Variables)
+  #    AZURE_CLIENT_ID       \$GITHUB_APP
+  #    AZURE_TENANT_ID       \$(az account show --query tenantId -o tsv)
+  #    AZURE_SUBSCRIPTION_ID $CURRENT_SUB
+
+After step 5, you can trigger deploys via:
+  gh workflow run deploy-${ENV}.yml --ref main -f dry_run=false
 
 EOF

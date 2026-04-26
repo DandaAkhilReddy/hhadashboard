@@ -1,0 +1,125 @@
+name: deploy-dev
+
+# Manual deploy of the dev environment via Azure OIDC federated identity.
+# No long-lived secrets in GitHub — the workflow exchanges its OIDC token for
+# a short-lived Azure access token at job start.
+#
+# One-time setup (operator runs once per environment, see infra/bootstrap.sh):
+#   az ad app federated-credential create \
+#     --id <github-actions-app-client-id> \
+#     --parameters '{
+#       "name": "github-deploy-dev",
+#       "issuer": "https://token.actions.githubusercontent.com",
+#       "subject": "repo:DandaAkhilReddy/hhadashboard:ref:refs/heads/main",
+#       "audiences": ["api://AzureADTokenExchange"]
+#     }'
+#
+# Then set these repository variables (Settings → Secrets and variables → Actions → Variables):
+#   AZURE_CLIENT_ID         — federated credential's app id
+#   AZURE_TENANT_ID         — HHA's M365 tenant id
+#   AZURE_SUBSCRIPTION_ID   — hha-production subscription id
+#
+# And these repository secrets (Settings → ... → Secrets) — supplied at deploy:
+#   POSTGRES_ADMIN_PASSWORD — set by bootstrap.sh after the first deploy
+#                             writes the password to KV; copy it here for
+#                             subsequent deploys (or fetch from KV in the
+#                             job below — see the commented step)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'what-if only (no changes)'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write    # required for OIDC token exchange
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false   # never cancel a deploy mid-flight
+
+jobs:
+  deploy:
+    name: az deployment group ${{ inputs.dry_run && 'what-if' || 'create' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: dev   # GitHub Environment for protection rules + audit log
+      url: https://app-hha-web-dev.azurewebsites.net
+
+    env:
+      ENV_NAME: dev
+      RG: rg-hha-dashboard-dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve deployer IP
+        id: ip
+        run: |
+          # GitHub-hosted runners have a known outbound IP each invocation;
+          # we add it as a transient firewall rule so the bootstrap step
+          # can write KV secrets after deploy. Real ops run from a
+          # workstation IP; this path is for the workflow only.
+          ip=$(curl -s https://api.ipify.org)
+          echo "deployer_ip=$ip" >> "$GITHUB_OUTPUT"
+          echo "::notice::Runner outbound IP for this run: $ip"
+
+      - name: az bicep what-if
+        if: ${{ inputs.dry_run }}
+        working-directory: hha-dashboard/infra
+        run: |
+          az deployment group what-if \
+            -g "$RG" \
+            -f main.bicep \
+            -p env/dev.bicepparam \
+            -p postgres_admin_password='__placeholder__' \
+            -p deployer_workstation_ip='${{ steps.ip.outputs.deployer_ip }}' \
+            -p azure_tenant_id_for_kv='${{ vars.AZURE_TENANT_ID }}'
+
+      - name: az deployment group create
+        if: ${{ !inputs.dry_run }}
+        working-directory: hha-dashboard/infra
+        run: |
+          # First deploy: postgres password is a placeholder; bootstrap.sh
+          # rotates it post-deploy. Subsequent deploys read the existing
+          # password from KV (operator passes via secret) so the parameter
+          # matches what's already there.
+          PG_PASSWORD='${{ secrets.POSTGRES_ADMIN_PASSWORD }}'
+          if [ -z "$PG_PASSWORD" ]; then
+            echo "::warning::POSTGRES_ADMIN_PASSWORD secret not set — using placeholder. Run bootstrap.sh after this deploy."
+            PG_PASSWORD='__placeholder__'
+          fi
+
+          az deployment group create \
+            -g "$RG" \
+            -f main.bicep \
+            -p env/dev.bicepparam \
+            -p postgres_admin_password="$PG_PASSWORD" \
+            -p deployer_workstation_ip='${{ steps.ip.outputs.deployer_ip }}' \
+            -p azure_tenant_id_for_kv='${{ vars.AZURE_TENANT_ID }}' \
+            --query 'properties.provisioningState' -o tsv
+
+      - name: Print outputs
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "=== Deployment outputs ==="
+          az deployment group show \
+            -g "$RG" \
+            -n main \
+            --query 'properties.outputs' -o json
+          echo
+          echo "Next step: run bootstrap.sh from a workstation that can"
+          echo "reach the Key Vault (or extend this workflow to invoke it"
+          echo "via az keyvault secret set commands using the deploy MI)."
