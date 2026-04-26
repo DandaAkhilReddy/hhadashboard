@@ -10,10 +10,35 @@ infra/
 │   ├── postgres.bicep        # Flex Server v16 + database + deployer firewall
 │   ├── appservice.bicep      # Plan + 2 sites (web + api), Linux runtime
 │   ├── vnet.bicep            # 10.20.0.0/16 + 3 subnets + 2 private DNS zones
-│   └── keyvault.bicep        # KV with RBAC, soft-delete, optional private endpoint
-└── env/
-    ├── dev.bicepparam        # enable_vnet=false, enable_keyvault=false
-    └── prod.bicepparam       # enable_vnet=true,  enable_keyvault=true
+│   ├── keyvault.bicep        # KV with RBAC, soft-delete, optional private endpoint
+│   └── storage.bicep         # Storage Account + uploads + backups containers
+├── env/
+│   ├── dev.bicepparam        # enable_vnet=false, enable_keyvault=false, enable_storage=false
+│   └── prod.bicepparam       # enable_vnet=true,  enable_keyvault=true,  enable_storage=true
+└── bootstrap.sh              # idempotent KV secret seeding (Phase 2 of deploy)
+```
+
+## Backups container immutability lock (operator step)
+
+The `backups` container is created as a regular soft-delete-enabled
+container. Once the first nightly `pg_backup` cron job writes a few
+test backups, the operator runs this **once per environment** to lock
+the WORM policy in place. Locking is **irreversible** — by design —
+so it isn't done automatically.
+
+```bash
+# After verifying a few backups have written successfully:
+az storage container immutability-policy create \
+  --account-name <storage_account_name from main.bicep output> \
+  --container-name backups \
+  --period 90 \
+  --allow-protected-append-writes true
+
+# Then lock the policy (cannot be unlocked, only extended):
+az storage container immutability-policy lock \
+  --account-name <storage_account_name> \
+  --container-name backups \
+  --if-match <etag from previous response>
 ```
 
 ## Two networking postures (parameter-driven)

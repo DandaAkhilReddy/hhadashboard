@@ -42,6 +42,13 @@ param enable_vnet = false
 param enable_keyvault = false
 param azure_tenant_id_for_kv = ''
 
+// Storage — off in dev. Local Azurite covers uploads at compose-up time;
+// real Storage Account is prod-only for now. Override to true if you want
+// to test the upload pipeline against real Azure Blob from dev.
+param enable_storage = false
+param storage_sku = 'Standard_LRS'
+param storage_soft_delete_retention_days = 7
+
 // Entra IDs — empty in dev so the API falls back to the Authorization: Dev <role>
 // stub flow. When the Entra app registrations land per docs/ENTRA_SETUP.md,
 // fill these in or override at deploy time.
