@@ -49,6 +49,6 @@ class DailyEntry(Base, TimestampMixin):
     entered_by_upn: Mapped[str] = mapped_column(String(200), nullable=False, info={"data_class": B})
     source: Mapped[str] = mapped_column(
         String(20), nullable=False, default="manual", info={"data_class": A}
-    )  # 'manual' | 'pdf_extract'
+    )  # 'manual' | 'pdf_extract' | 'manual_portal' (the /census/* portal)
     pdf_sha256: Mapped[str | None] = mapped_column(String(64), info={"data_class": A})
     notes: Mapped[str | None] = mapped_column(Text, info={"data_class": A})
