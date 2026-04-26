@@ -12,6 +12,7 @@ dashboard authenticates via app/services/entra_jwt.py + app/deps.py.
 
 from __future__ import annotations
 
+import contextlib
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -41,11 +42,11 @@ class AuthError(Exception):
     """Base for portal auth failures."""
 
 
-class InvalidCredentials(AuthError):
+class InvalidCredentialsError(AuthError):
     """Email + password did not verify."""
 
 
-class AccountLocked(AuthError):
+class AccountLockedError(AuthError):
     """Too many failed attempts; locked until `locked_until`."""
 
     def __init__(self, locked_until: datetime) -> None:
@@ -64,8 +65,8 @@ async def verify_credentials(
     """Verify email + password against the stored credential.
 
     Raises:
-        AccountLocked: row is currently locked (returns lock-until time).
-        InvalidCredentials: email mismatch or password mismatch (no row vs wrong
+        AccountLockedError: row is currently locked (returns lock-until time).
+        InvalidCredentialsError: email mismatch or password mismatch (no row vs wrong
             password are indistinguishable from the caller's POV — same error).
     """
     now = datetime.now(UTC)
@@ -77,17 +78,15 @@ async def verify_credentials(
     ).scalar_one_or_none()
 
     if row is None:
-        # Don't leak whether the email exists. Sleep is unnecessary because
-        # argon2 verification dominates timing anyway and this branch never
-        # enters it. Use a fixed dummy hash to roughly match real-path latency.
-        try:
+        # Don't leak whether the email exists. Run argon2 against a dummy
+        # hash so this branch's wall-time roughly matches the real-verify
+        # path; the dummy hash is unguessable so verify always fails.
+        with contextlib.suppress(VerifyMismatchError):
             _HASHER.verify(_DUMMY_HASH, password)
-        except VerifyMismatchError:
-            pass
-        raise InvalidCredentials
+        raise InvalidCredentialsError
 
     if row.locked_until is not None and row.locked_until > now:
-        raise AccountLocked(row.locked_until)
+        raise AccountLockedError(row.locked_until)
 
     try:
         _HASHER.verify(row.password_hash, password)
@@ -102,9 +101,9 @@ async def verify_credentials(
                 email=email,
                 locked_until=row.locked_until.isoformat(),
             )
-            raise AccountLocked(row.locked_until) from None
+            raise AccountLockedError(row.locked_until) from None
         await db.flush()
-        raise InvalidCredentials from None
+        raise InvalidCredentialsError from None
 
     # Success — clear failure state, but DON'T issue session here. That's
     # issue_session()'s job (called from the router after this returns).

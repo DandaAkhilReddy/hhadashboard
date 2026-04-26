@@ -13,14 +13,13 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from jobs.paycom_sync.extractors import ROUTES, ExtractionResult
 from jobs.paycom_sync.extractors.headcount_daily import extract_headcount_daily
 from jobs.paycom_sync.extractors.rvu_paycheck import extract_rvu_paycheck
 from jobs.paycom_sync.main import run
 
-pytestmark = pytest.mark.asyncio
+# pytest's asyncio_mode = "auto" (in pyproject.toml) marks every coroutine
+# test automatically — no need for an explicit pytestmark.
 
 
 async def test_run_exits_zero_when_paycom_not_configured() -> None:

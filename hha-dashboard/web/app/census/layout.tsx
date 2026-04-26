@@ -23,13 +23,9 @@ export default function CensusLayout({
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-700 font-extrabold text-white">
               H
             </div>
-            <div className="text-base font-semibold text-slate-900">
-              HHA Census Entry
-            </div>
+            <div className="text-base font-semibold text-slate-900">HHA Census Entry</div>
           </div>
-          <div className="text-xs uppercase tracking-wide text-slate-500">
-            Entry-only portal
-          </div>
+          <div className="text-xs uppercase tracking-wide text-slate-500">Entry-only portal</div>
         </div>
       </header>
       <div className="mx-auto max-w-3xl px-6 py-8">{children}</div>

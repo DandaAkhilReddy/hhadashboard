@@ -35,26 +35,17 @@ function toRow(site: PortalSite): RowState {
   };
 }
 
-export function CensusEntryForm({
-  initialDate,
-  initialSites,
-  apiBase,
-}: CensusEntryFormProps) {
+export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEntryFormProps) {
   const router = useRouter();
   const [rows, setRows] = useState<RowState[]>(() => initialSites.map(toRow));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
-  const ready = useMemo(
-    () => rows.some((r) => r.census.trim().length > 0),
-    [rows],
-  );
+  const ready = useMemo(() => rows.some((r) => r.census.trim().length > 0), [rows]);
 
   function updateRow(index: number, patch: Partial<RowState>): void {
-    setRows((current) =>
-      current.map((r, i) => (i === index ? { ...r, ...patch } : r)),
-    );
+    setRows((current) => current.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -128,9 +119,7 @@ export function CensusEntryForm({
           <tbody>
             {rows.map((row, idx) => (
               <tr key={row.site_id} className="border-t border-slate-100">
-                <td className="px-4 py-2 font-medium text-slate-900">
-                  {row.site_name}
-                </td>
+                <td className="px-4 py-2 font-medium text-slate-900">{row.site_name}</td>
                 <td className="px-4 py-2 text-slate-500">{row.state}</td>
                 <td className="px-4 py-2">
                   <input
@@ -151,9 +140,7 @@ export function CensusEntryForm({
                     min={0}
                     max={50}
                     value={row.open_shifts}
-                    onChange={(e) =>
-                      updateRow(idx, { open_shifts: e.target.value })
-                    }
+                    onChange={(e) => updateRow(idx, { open_shifts: e.target.value })}
                     aria-label={`${row.site_name} open shifts`}
                     className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
@@ -173,12 +160,9 @@ export function CensusEntryForm({
         </div>
       ) : null}
       {savedAt ? (
-        <div
-          role="status"
-          className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
-        >
+        <output className="block rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
           Saved at {new Date(savedAt).toLocaleTimeString()}.
-        </div>
+        </output>
       ) : null}
 
       <div className="flex items-center justify-between">

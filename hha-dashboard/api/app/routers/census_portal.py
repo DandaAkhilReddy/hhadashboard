@@ -81,13 +81,13 @@ async def login(
     """
     try:
         cred = await census_auth.verify_credentials(db, payload.email, payload.password)
-    except census_auth.AccountLocked as e:
+    except census_auth.AccountLockedError as e:
         await db.commit()  # persist the lock-state update
         raise HTTPException(
             status.HTTP_423_LOCKED,
             f"Too many failed attempts. Try again after {e.locked_until.isoformat()}.",
         ) from None
-    except census_auth.InvalidCredentials:
+    except census_auth.InvalidCredentialsError:
         await db.commit()  # persist the failed_attempts increment if any
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password") from None
 

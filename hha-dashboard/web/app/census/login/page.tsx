@@ -29,8 +29,7 @@ export default function CensusLoginPage() {
       });
       if (res.status === 423) {
         setError({
-          message:
-            "Too many failed attempts. The account is locked for 15 minutes.",
+          message: "Too many failed attempts. The account is locked for 15 minutes.",
         });
         return;
       }
@@ -53,14 +52,10 @@ export default function CensusLoginPage() {
   return (
     <div className="mx-auto mt-12 max-w-sm rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
       <h1 className="mb-1 text-xl font-semibold text-slate-900">Sign in</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Census entry portal — single shared credential.
-      </p>
+      <p className="mb-6 text-sm text-slate-500">Census entry portal — single shared credential.</p>
       <form onSubmit={onSubmit} className="space-y-4">
         <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">
-            Email
-          </span>
+          <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
           <input
             type="email"
             value={email}
@@ -71,9 +66,7 @@ export default function CensusLoginPage() {
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">
-            Password
-          </span>
+          <span className="mb-1 block text-sm font-medium text-slate-700">Password</span>
           <input
             type="password"
             value={password}

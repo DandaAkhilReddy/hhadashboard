@@ -36,8 +36,7 @@ export default async function CensusEntryPage() {
   if (!res.ok) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-        Could not load facility list (status {res.status}). Please try
-        signing in again.
+        Could not load facility list (status {res.status}). Please try signing in again.
       </div>
     );
   }

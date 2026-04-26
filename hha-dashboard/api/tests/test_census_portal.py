@@ -23,6 +23,7 @@ from app.deps import SessionLocal
 from app.main import app
 from app.models.census_credentials import CensusCredential
 from app.models.entries import DailyEntry
+from app.models.masters import Site
 from app.services import census_auth
 
 pytestmark = pytest.mark.asyncio
@@ -192,20 +193,31 @@ async def test_daily_census_with_valid_session_writes_with_manual_portal_source(
 ) -> None:
     _ = seeded_credential
     today = datetime.now(UTC).date()
+
+    # Ensure at least one site exists so the upsert has a valid site_id.
+    # Tests don't assume scripts/seed_sites.py was run against the test DB.
+    async with SessionLocal() as session:
+        existing_sites = (await session.execute(select(Site))).scalars().all()
+        if not existing_sites:
+            session.add(Site(name="Test Site", state="FL", status="ACTIVE"))
+            await session.commit()
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         login_r = await client.post(
             "/api/v1/census-portal/login",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
         )
         assert login_r.status_code == 200
-        # Pull the first site_id from the prefill payload — sites are seeded
-        # by 0001_initial.py, so the table is non-empty.
         sites = login_r.json()["sites"]
-        assert sites, "expected at least one seeded site"
+        assert sites, "expected at least one site (seeded above if missing)"
         site_id = sites[0]["site_id"]
+        # Cookie has Secure=True; AsyncClient strips it under http://. Re-pass.
+        cookie = login_r.cookies.get("census_session")
+        assert cookie is not None
 
         r = await client.post(
             "/api/v1/census-portal/daily-census",
+            cookies={"census_session": cookie},
             json={
                 "entry_date": today.isoformat(),
                 "rows": [{"site_id": site_id, "census": 123, "open_shifts": 1}],
