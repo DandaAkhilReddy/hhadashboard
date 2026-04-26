@@ -11,7 +11,8 @@ infra/
 │   ├── appservice.bicep      # Plan + 2 sites (web + api), Linux runtime
 │   ├── vnet.bicep            # 10.20.0.0/16 + 3 subnets + 2 private DNS zones
 │   ├── keyvault.bicep        # KV with RBAC, soft-delete, optional private endpoint
-│   └── storage.bicep         # Storage Account + uploads + backups containers
+│   ├── storage.bicep         # Storage Account + uploads + backups containers
+│   └── monitor.bicep         # Log Analytics workspace + App Insights
 ├── env/
 │   ├── dev.bicepparam        # enable_vnet=false, enable_keyvault=false, enable_storage=false
 │   └── prod.bicepparam       # enable_vnet=true,  enable_keyvault=true,  enable_storage=true

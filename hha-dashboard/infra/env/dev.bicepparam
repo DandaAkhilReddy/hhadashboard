@@ -49,6 +49,13 @@ param enable_storage = false
 param storage_sku = 'Standard_LRS'
 param storage_soft_delete_retention_days = 7
 
+// Monitor — off in dev to save Log Analytics ingestion costs (~$2.30/GB).
+// App Insights connection string in api app_settings is empty; the SDK
+// noops gracefully. Override to true if you want to validate the
+// Diagnostic Settings wiring against a real workspace.
+param enable_monitor = false
+param monitor_retention_days = 30
+
 // Entra IDs — empty in dev so the API falls back to the Authorization: Dev <role>
 // stub flow. When the Entra app registrations land per docs/ENTRA_SETUP.md,
 // fill these in or override at deploy time.

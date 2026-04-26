@@ -97,6 +97,14 @@ param enable_keyvault bool = false
 @description('Enable Storage Account module (uploads + backups containers). Public-access disabled when enable_vnet is also true (PE wiring follows in Session 11+); otherwise public with deployer-IP allowlist.')
 param enable_storage bool = false
 
+@description('Enable Log Analytics + App Insights (monitor.bicep) plus Diagnostic Settings on every audited resource. Required for HIPAA audit chain in prod; optional in dev.')
+param enable_monitor bool = false
+
+@description('Log Analytics retention in days. 30 dev, 90 prod.')
+@minValue(30)
+@maxValue(730)
+param monitor_retention_days int = 30
+
 @description('Storage Account name. Convention: sthhad{env} (lowercase, alphanumeric only, globally unique). Default composes from env.')
 param storage_account_name string = 'sthha${env_name}${uniqueString(resourceGroup().id)}'
 
@@ -131,6 +139,8 @@ var api_name = 'app-hha-api-${env_name}'
 var database_name = 'hha_dashboard'
 var vnet_name = 'vnet-hha-${env_name}'
 var kv_name = 'kv-hha-${env_name}'
+var log_analytics_name = 'log-hha-${env_name}'
+var app_insights_name = 'appi-hha-${env_name}'
 
 // ---------------------------------------------------------------------------
 // Modules
@@ -203,6 +213,21 @@ module storage './modules/storage.bicep' = if (enable_storage) {
   }
 }
 
+// Log Analytics workspace + Application Insights — observability foundation.
+// Diagnostic Settings on each downstream resource (postgres, app service,
+// keyvault, storage) point at the workspace. Defined in this file (not the
+// module) because each Diagnostic Setting is scoped to its target resource.
+module monitor './modules/monitor.bicep' = if (enable_monitor) {
+  name: 'monitor-deploy'
+  params: {
+    log_analytics_name: log_analytics_name
+    app_insights_name: app_insights_name
+    location: location
+    retention_days: monitor_retention_days
+    tags: tags
+  }
+}
+
 // Compose connection strings.
 //
 // App Service resolves `@Microsoft.KeyVault(...)` references only when the
@@ -246,7 +271,8 @@ var api_app_settings = union(common_app_settings, {
   ENTRA_GROUP_OWNER_HR: entra_groups.owner_hr
   AZURE_STORAGE_ACCOUNT_URL: enable_storage ? storage!.outputs.blob_endpoint : ''
   AZURE_STORAGE_UPLOADS_CONTAINER: enable_storage ? storage!.outputs.uploads_container_name : 'uploads'
-  // Defer to Session 11+: ACS connection, Doc Intelligence endpoint
+  APPLICATIONINSIGHTS_CONNECTION_STRING: enable_monitor ? monitor!.outputs.app_insights_connection_string : ''
+  // Defer to Session 12+: ACS connection, Doc Intelligence endpoint
 })
 
 var web_app_settings = union(common_app_settings, {
@@ -320,6 +346,178 @@ resource apiKvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' =
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kv_secrets_user_role_id)
     principalId: appservice.outputs.api_principal_id
     principalType: 'ServicePrincipal'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic Settings — wire every audited resource to the Log Analytics
+// workspace when enable_monitor is true. Each setting is scoped to its
+// target resource via the `existing` reference pattern.
+//
+// Categories chosen for HIPAA audit relevance:
+//   - Postgres: PostgreSQLLogs (connection events) + PostgreSQLFlexSessions
+//   - App Service: AppServiceConsoleLogs, AppServiceHTTPLogs, AppServiceAuditLogs
+//   - Key Vault: AuditEvent (every secret read/write)
+//   - Storage (blob service): StorageRead, StorageWrite, StorageDelete
+//
+// AllMetrics enabled on every target so platform metrics flow alongside.
+// ---------------------------------------------------------------------------
+
+resource pgServerForDiag 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' existing = if (enable_monitor) {
+  name: postgres_name
+}
+
+resource webForDiag 'Microsoft.Web/sites@2024-04-01' existing = if (enable_monitor) {
+  name: web_name
+}
+
+resource apiForDiag 'Microsoft.Web/sites@2024-04-01' existing = if (enable_monitor) {
+  name: api_name
+}
+
+resource pgDiag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (enable_monitor) {
+  scope: pgServerForDiag
+  name: 'to-log-analytics'
+  properties: {
+    workspaceId: monitor!.outputs.workspace_id
+    logs: [
+      {
+        category: 'PostgreSQLLogs'
+        enabled: true
+      }
+      {
+        category: 'PostgreSQLFlexSessions'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
+  }
+}
+
+resource webDiag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (enable_monitor) {
+  scope: webForDiag
+  name: 'to-log-analytics'
+  properties: {
+    workspaceId: monitor!.outputs.workspace_id
+    logs: [
+      {
+        category: 'AppServiceConsoleLogs'
+        enabled: true
+      }
+      {
+        category: 'AppServiceHTTPLogs'
+        enabled: true
+      }
+      {
+        category: 'AppServiceAuditLogs'
+        enabled: true
+      }
+      {
+        category: 'AppServiceAppLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
+  }
+}
+
+resource apiDiag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (enable_monitor) {
+  scope: apiForDiag
+  name: 'to-log-analytics'
+  properties: {
+    workspaceId: monitor!.outputs.workspace_id
+    logs: [
+      {
+        category: 'AppServiceConsoleLogs'
+        enabled: true
+      }
+      {
+        category: 'AppServiceHTTPLogs'
+        enabled: true
+      }
+      {
+        category: 'AppServiceAuditLogs'
+        enabled: true
+      }
+      {
+        category: 'AppServiceAppLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
+  }
+}
+
+resource kvDiag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (enable_monitor && enable_keyvault) {
+  scope: kvVaultExisting
+  name: 'to-log-analytics'
+  properties: {
+    workspaceId: monitor!.outputs.workspace_id
+    logs: [
+      {
+        category: 'AuditEvent'
+        enabled: true
+      }
+      {
+        category: 'AzurePolicyEvaluationDetails'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
+  }
+}
+
+// Storage Account diagnostic settings target the blob service sub-resource
+// (audit at the data-plane level); the account-level settings are minimal.
+resource blobServiceForDiag 'Microsoft.Storage/storageAccounts/blobServices@2024-01-01' existing = if (enable_monitor && enable_storage) {
+  name: '${storage_account_name}/default'
+}
+
+resource blobDiag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (enable_monitor && enable_storage) {
+  scope: blobServiceForDiag
+  name: 'to-log-analytics'
+  properties: {
+    workspaceId: monitor!.outputs.workspace_id
+    logs: [
+      {
+        category: 'StorageRead'
+        enabled: true
+      }
+      {
+        category: 'StorageWrite'
+        enabled: true
+      }
+      {
+        category: 'StorageDelete'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'Transaction'
+        enabled: true
+      }
+    ]
   }
 }
 
