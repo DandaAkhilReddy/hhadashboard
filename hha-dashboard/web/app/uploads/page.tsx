@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/PageHeader";
-import { UploadDropZone } from "./UploadDropZone";
 import { api } from "@/lib/api-client";
+import { UploadDropZone } from "./UploadDropZone";
 
 export default async function UploadsPage() {
   // Initial list server-side so first paint is fast; client polls for updates after that

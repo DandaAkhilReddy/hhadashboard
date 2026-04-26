@@ -8,10 +8,10 @@
  * a sign-in step.
  */
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useMsal } from "@azure/msal-react";
 import { isMsalConfigured, loginScopes } from "@/lib/auth/msal-config";
+import { useMsal } from "@azure/msal-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export default function SignInPage() {
   const router = useRouter();

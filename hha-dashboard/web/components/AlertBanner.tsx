@@ -14,10 +14,7 @@ export function AlertBanner({ alerts }: { alerts: Alert[] }) {
       {alerts.map((a) => (
         <div
           key={a.id}
-          className={cn(
-            "flex items-start gap-3 rounded-xl border p-4",
-            STYLES[a.severity],
-          )}
+          className={cn("flex items-start gap-3 rounded-xl border p-4", STYLES[a.severity])}
         >
           <span className="dot mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full" />
           <div className="min-w-0 flex-1">

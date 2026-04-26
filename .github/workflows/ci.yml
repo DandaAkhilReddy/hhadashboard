@@ -43,7 +43,13 @@ jobs:
           --health-retries 10
 
     env:
-      ENV: ci
+      # Dev mode here is intentional: the existing test suite hits FastAPI
+      # with Authorization: Dev <role> headers, which only the dev-stub
+      # branch in app/deps.py::get_current_user accepts. ENV=ci would make
+      # those tests 401 across the board (real Entra JWT verification path
+      # has no test fixture). Real prod-mode CI lands with deploy-prod.yml
+      # in Session 10, separately.
+      ENV: dev
       LOG_LEVEL: INFO
       DATABASE_URL: postgresql+asyncpg://hha:hha@localhost:5432/hha_dashboard
       DATABASE_URL_SYNC: postgresql+psycopg://hha:hha@localhost:5432/hha_dashboard
@@ -57,9 +63,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          version: latest
+        uses: astral-sh/setup-uv@v6
 
       - name: Sync dependencies
         run: uv sync --frozen
@@ -108,39 +112,63 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Bicep — compile + lint check. No live deploy.
+  # Skips cleanly if infra/ doesn't exist (early-checkout test).
   # ---------------------------------------------------------------------------
   bicep:
     name: bicep (build + lint)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: ${{ hashFiles('hha-dashboard/infra/main.bicep') != '' }}
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect infra/
+        id: detect
+        run: |
+          if [ -f hha-dashboard/infra/main.bicep ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No infra/main.bicep on this branch — skipping bicep checks."
+          fi
+
       - name: Install Bicep CLI
+        if: steps.detect.outputs.exists == 'true'
         run: |
           curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
           chmod +x bicep
           sudo mv bicep /usr/local/bin/bicep
           bicep --version
 
-      - name: Build main + modules
+      - name: Build every .bicep file
+        if: steps.detect.outputs.exists == 'true'
         working-directory: hha-dashboard/infra
         run: |
-          bicep build main.bicep --outfile /tmp/main.json
-          bicep build modules/postgres.bicep --outfile /tmp/postgres.json
-          bicep build modules/appservice.bicep --outfile /tmp/appservice.json
+          shopt -s globstar nullglob
+          for f in main.bicep modules/*.bicep; do
+            echo "::group::build $f"
+            bicep build "$f" --outfile "/tmp/$(basename "$f" .bicep).json"
+            echo "::endgroup::"
+          done
 
       - name: Build parameter files
+        if: steps.detect.outputs.exists == 'true'
         working-directory: hha-dashboard/infra
         run: |
-          bicep build-params env/dev.bicepparam --outfile /tmp/dev.params.json
-          bicep build-params env/prod.bicepparam --outfile /tmp/prod.params.json
+          shopt -s nullglob
+          for f in env/*.bicepparam; do
+            echo "::group::build-params $f"
+            bicep build-params "$f" --outfile "/tmp/$(basename "$f" .bicepparam).params.json"
+            echo "::endgroup::"
+          done
 
-      - name: Lint
+      - name: Lint every .bicep file
+        if: steps.detect.outputs.exists == 'true'
         working-directory: hha-dashboard/infra
         run: |
-          bicep lint main.bicep
-          bicep lint modules/postgres.bicep
-          bicep lint modules/appservice.bicep
+          shopt -s globstar nullglob
+          for f in main.bicep modules/*.bicep; do
+            echo "::group::lint $f"
+            bicep lint "$f"
+            echo "::endgroup::"
+          done

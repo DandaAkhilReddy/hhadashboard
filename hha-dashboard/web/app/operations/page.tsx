@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { Badge } from "@/components/Badge";
 import { Card, CardHeader } from "@/components/Card";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { api } from "@/lib/api-client";
 import { dateShort, num, pct, signed, usd } from "@/lib/format";
+import Link from "next/link";
 
 export default async function OperationsPage() {
   const [summary, sites] = await Promise.all([api.operationsSummary(), api.sitesToday()]);
@@ -18,10 +18,16 @@ export default async function OperationsPage() {
         subtitle="11 sites · FL (7) + TX (4) · Daily census, coverage, contracts"
         right={
           <>
-            <button className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+            <button
+              type="button"
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
               Export CSV
             </button>
-            <button className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800">
+            <button
+              type="button"
+              className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+            >
               + Enter Today&apos;s Data
             </button>
           </>
@@ -93,9 +99,15 @@ export default async function OperationsPage() {
                       ? "text-red-600"
                       : "text-amber-600";
                 return (
-                  <tr key={s.name} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                  <tr
+                    key={s.name}
+                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                  >
                     <td className="py-2.5 font-semibold text-slate-900">
-                      <Link href={`/operations/${s.id}`} className="hover:text-indigo-600 hover:underline">
+                      <Link
+                        href={`/operations/${s.id}`}
+                        className="hover:text-indigo-600 hover:underline"
+                      >
                         {s.name}
                       </Link>
                     </td>
@@ -112,13 +124,25 @@ export default async function OperationsPage() {
                       )}
                     </td>
                     <td className="py-2.5 text-xs text-slate-500">{s.liaison ?? "—"}</td>
-                    <td className={`py-2.5 text-center font-bold tabular-nums ${tone}`}>{s.census_today}</td>
-                    <td className="py-2.5 text-center tabular-nums text-slate-500">{s.census_3mo_avg}</td>
-                    <td className="py-2.5 text-center tabular-nums text-slate-400">{s.mtd_avg.toFixed(1)}</td>
-                    <td className={`py-2.5 text-center tabular-nums ${tone}`}>{pct(s.variance_pct)}</td>
-                    <td className={`py-2.5 text-center font-bold tabular-nums ${shiftsTone}`}>{s.open_shifts}</td>
+                    <td className={`py-2.5 text-center font-bold tabular-nums ${tone}`}>
+                      {s.census_today}
+                    </td>
+                    <td className="py-2.5 text-center tabular-nums text-slate-500">
+                      {s.census_3mo_avg}
+                    </td>
+                    <td className="py-2.5 text-center tabular-nums text-slate-400">
+                      {s.mtd_avg.toFixed(1)}
+                    </td>
+                    <td className={`py-2.5 text-center tabular-nums ${tone}`}>
+                      {pct(s.variance_pct)}
+                    </td>
+                    <td className={`py-2.5 text-center font-bold tabular-nums ${shiftsTone}`}>
+                      {s.open_shifts}
+                    </td>
                     <td className="py-2.5 text-xs text-slate-500">{dateShort(s.contract_end)}</td>
-                    <td className="py-2.5 text-xs text-slate-500">{usd(s.annual_subsidy_usd, true)}</td>
+                    <td className="py-2.5 text-xs text-slate-500">
+                      {usd(s.annual_subsidy_usd, true)}
+                    </td>
                     <td className="py-2.5">
                       {s.md_status === "VACANT" ? (
                         <Badge variant="bad">VACANT ⚠</Badge>
@@ -151,9 +175,15 @@ export default async function OperationsPage() {
             </thead>
             <tbody>
               {tx.map((s) => (
-                <tr key={s.name} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                <tr
+                  key={s.name}
+                  className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                >
                   <td className="py-2.5 font-semibold text-slate-900">
-                    <Link href={`/operations/${s.id}`} className="hover:text-indigo-600 hover:underline">
+                    <Link
+                      href={`/operations/${s.id}`}
+                      className="hover:text-indigo-600 hover:underline"
+                    >
                       {s.name}
                     </Link>
                   </td>

@@ -13,11 +13,10 @@ See docs/adr/001-hipaa-data-classification.md.
 
 from __future__ import annotations
 
-from app.models.base import Base, DataClass
-
 # Import every model module here so its tables register on Base.metadata.
 # As new model files are added, import them below.
 from app.models import audit, entries, masters, uploads  # noqa: F401
+from app.models.base import Base, DataClass
 
 VALID_DATA_CLASSES = {c.value for c in DataClass}
 

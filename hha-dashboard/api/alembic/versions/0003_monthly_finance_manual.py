@@ -12,6 +12,7 @@ TX stays manual indefinitely per the FL-only Ventra scope decision.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0003"

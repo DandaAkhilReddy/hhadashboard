@@ -8,27 +8,67 @@ infra/
 ├── main.bicep                # RG-scoped orchestrator
 ├── modules/
 │   ├── postgres.bicep        # Flex Server v16 + database + deployer firewall
-│   └── appservice.bicep      # Plan + 2 sites (web + api), Linux runtime
+│   ├── appservice.bicep      # Plan + 2 sites (web + api), Linux runtime
+│   ├── vnet.bicep            # 10.20.0.0/16 + 3 subnets + 2 private DNS zones
+│   └── keyvault.bicep        # KV with RBAC, soft-delete, optional private endpoint
 └── env/
-    ├── dev.bicepparam
-    └── prod.bicepparam
+    ├── dev.bicepparam        # enable_vnet=false, enable_keyvault=false
+    └── prod.bicepparam       # enable_vnet=true,  enable_keyvault=true
 ```
 
-## What's IN this scaffold (Session 8)
+## Two networking postures (parameter-driven)
 
-- One **PostgreSQL Flexible Server v16** + the `hha_dashboard` database
+| Toggle | Dev (default) | Prod (default) |
+|---|---|---|
+| `enable_vnet` | `false` | `true` |
+| `enable_keyvault` | `false` | `true` |
+| Postgres reachable from | Public + workstation firewall rule | VNet only (private NIC in delegated subnet) |
+| Key Vault reachable from | (not deployed) | VNet only via private endpoint |
+| App Service → Postgres | Public over the firewall allowlist | **GAP — Session 10 closes via App Service VNet integration** |
+| Approx monthly cost overhead | $0 | ~$30 (VNet + 2 PEs + 2 DNS zones in eastus2) |
+
+**Known temporary gap (Session 10 closes it):** when `enable_vnet=true`,
+Postgres has `publicNetworkAccess: Disabled`. App Service is **not** yet
+wired into the VNet (regional VNet integration on `Microsoft.Web/sites/networkConfig`
+lands with the OIDC PR), so its outbound calls to Postgres will fail until
+that wiring exists. **Don't deploy with `enable_vnet=true` to a
+running environment** until Session 10 ships, or App Service won't be able
+to reach the database. Dev (where `enable_vnet=false`) keeps working.
+
+## What's IN this scaffold (Sessions 8 + 9)
+
+- **PostgreSQL Flexible Server v16** + the `hha_dashboard` database
   (TLS 1.2 enforced via server config, storage encrypted, retention 7 d dev /
-  35 d prod, geo-redundant + zone-redundant HA in prod)
-- One **App Service Plan (Linux)** + one **web** App Service (Next.js,
-  `NODE|20-lts`) + one **api** App Service (FastAPI, `PYTHON|3.12`)
-- HTTPS-only, `minTlsVersion: 1.2`, FTPS disabled, system-assigned managed
-  identity, health-check path wired
-- A single Postgres firewall rule for the **deployer's workstation IP**
+  35 d prod, geo-redundant + zone-redundant HA in prod, **VNet injection in
+  prod** when `enable_vnet=true`)
+- **App Service Plan (Linux)** + **web** App Service (Next.js,
+  `NODE|20-lts`) + **api** App Service (FastAPI, `PYTHON|3.12`) — HTTPS-only,
+  `minTlsVersion: 1.2`, FTPS disabled, system-assigned managed identity,
+  health-check path wired
+- **VNet** (`enable_vnet=true`): 10.20.0.0/16, three subnets — `app` (delegated
+  to `Microsoft.Web/serverFarms`), `postgres` (delegated to
+  `Microsoft.DBforPostgreSQL/flexibleServers` for VNet injection),
+  `private-endpoints` (no delegation, ready for KV + future PEs). Two private
+  DNS zones (`privatelink.postgres.database.azure.com`,
+  `privatelink.vaultcore.azure.net`) with VNet links so callers inside the
+  VNet resolve the privatelink names automatically.
+- **Key Vault** (`enable_keyvault=true`): RBAC auth (no access policies),
+  90-day soft-delete + purge protection, `networkAcls.defaultAction: Deny`.
+  When `enable_vnet=true`, KV gets a private endpoint in the PE subnet and
+  `publicNetworkAccess: Disabled`. When `enable_vnet=false` (dev), KV stays
+  public with the deployer-workstation IP allowlist. The vault is created
+  **empty** — `bootstrap.sh` (Session 10) seeds the postgres admin password
+  and other secrets out of band.
 
 ## What's NOT in this scaffold (deferred — see [the build plan](../../../.claude/plans/so-now-we-are-nested-grove.md))
 
-- VNet integration / private endpoints / private DNS zones
-- Key Vault (secrets pass via app settings; KV references replace later)
+- App Service VNet integration (`Microsoft.Web/sites/networkConfig`) → Session 10
+- KV → App Service RBAC role assignments (`Key Vault Secrets User`) → Session 10
+- KV references in `app_settings` (`@Microsoft.KeyVault(...)` syntax) — **gap**: the
+  postgres password still flows through as a literal in `app_settings` until
+  Session 10 wires it via KV reference
+- `bootstrap.sh` that seeds initial KV secrets and creates the federated
+  identity credential for OIDC → Session 10
 - Blob Storage (uploads container, immutable backups container)
 - Container Apps Jobs (cron: `paycom_sync`, `ventra_ingest`, `alert_digest`,
   `cred_scan`, `pg_backup`)

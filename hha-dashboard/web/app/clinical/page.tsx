@@ -5,10 +5,7 @@ import { api } from "@/lib/api-client";
 import { dateShort, num, pct } from "@/lib/format";
 
 export default async function ClinicalPage() {
-  const [summary, expiring] = await Promise.all([
-    api.clinicalSummary(),
-    api.credentialsExpiring(),
-  ]);
+  const [summary, expiring] = await Promise.all([api.clinicalSummary(), api.credentialsExpiring()]);
 
   const urgent = expiring.filter((c) => c.tier === "urgent");
   const warning = expiring.filter((c) => c.tier === "warning");
@@ -42,11 +39,7 @@ export default async function ClinicalPage() {
             </span>
           }
         />
-        <MetricCard
-          label="Avg LOS · TX"
-          value={`${summary.los_tx_days}d`}
-          sub="Within range"
-        />
+        <MetricCard label="Avg LOS · TX" value={`${summary.los_tx_days}d`} sub="Within range" />
       </div>
 
       <div className="mb-6 grid gap-6 md:grid-cols-3">
@@ -68,7 +61,10 @@ export default async function ClinicalPage() {
               </li>
             ))}
           </ul>
-          <button className="mt-4 w-full rounded-md bg-slate-900 py-2 text-xs font-semibold text-white hover:bg-slate-800">
+          <button
+            type="button"
+            className="mt-4 w-full rounded-md bg-slate-900 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+          >
             Email Crystal now
           </button>
         </Card>
@@ -88,7 +84,9 @@ export default async function ClinicalPage() {
               </li>
             ))}
           </ul>
-          <div className="mt-3 text-xs text-slate-500">Routine renewal window · auto-email weekly</div>
+          <div className="mt-3 text-xs text-slate-500">
+            Routine renewal window · auto-email weekly
+          </div>
         </Card>
 
         <Card>
@@ -122,7 +120,9 @@ export default async function ClinicalPage() {
             </div>
           </div>
           <div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800">Owner</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+              Owner
+            </div>
             <div className="mt-1 text-sm text-amber-900">Dr. Aneja · PIP weekly review</div>
           </div>
         </div>

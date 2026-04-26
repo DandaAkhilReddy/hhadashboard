@@ -414,27 +414,29 @@ shred raw file from Blob after 30 days (lifecycle policy)
 
 ### Phase 0 — Foundation (Week 1–2)
 
-**Status as of 2026-04-25** (see [docs/SESSION_RECAP_2026-04-25.md](hha-dashboard/docs/SESSION_RECAP_2026-04-25.md) for the full PR list):
+**Status as of 2026-04-26** (see [hha-dashboard/docs/SESSION_RECAP_2026-04-25.md](hha-dashboard/docs/SESSION_RECAP_2026-04-25.md) for the full PR list):
 
 | Bucket | State |
 |---|---|
-| Code (FastAPI + Next.js scaffolds, models, alembic, audit, MSAL, scorecards) | Largely **done** — PRs #9–#10 (open), prior PRs #1–#8 merged |
-| Bicep scaffold (postgres + app service modules + dev/prod params) | **Open** — PR #13 (compile-clean, no live deploy yet) |
-| Bicep remaining (vnet, keyvault, blob, container jobs, monitor, ACS, RBAC) | **Pending** — Sessions 9–11 |
+| Code (FastAPI + Next.js scaffolds, models, alembic, audit, MSAL, scorecards) | **Done** — PRs #1–#12 merged |
+| Bicep scaffold (postgres + app service + dev/prod params + CI workflow) | **Done** — PRs #13 + #14 merged |
+| Bicep VNet + Key Vault modules (compile-only) | **Open** — PR #15 |
+| Bicep remaining (blob, container jobs, monitor, ACS, RBAC) | **Pending** — Sessions 10–11 |
+| App Service VNet integration + KV references in app_settings | **Pending** — Session 10 |
 | Live Azure deployment | **Pending** — needs subscription + workstation IP + KV admin password |
 | Entra app registrations + security groups | **Pending** — Reddy / tenant admin parallel track |
-| GitHub Actions OIDC + deploy workflows | **Pending** — Session 9 |
+| GitHub Actions OIDC + deploy workflows | **Pending** — Session 10 |
 
 **Azure resources (via Claude Code + Bicep):**
 
 - [ ] Azure subscription `hha-production` under HHA tenant (you create this manually, one-time)
 - [ ] Resource group `rg-hha-dashboard-dev`
-- [ ] VNet with app + private-endpoint subnets *(Session 9)*
-- [x] **Postgres Flex (B2ms burstable for dev)** — Bicep module landed in PR #13
-- [ ] Key Vault with private endpoint *(Session 9)*
+- [x] **VNet with app + private-endpoint subnets** — `vnet.bicep` in PR #15
+- [x] **Postgres Flex (B2ms burstable for dev)** — Bicep module merged in PR #13; VNet injection mode added in PR #15
+- [x] **Key Vault with private endpoint** — `keyvault.bicep` in PR #15 (empty vault; secret seeding in Session 10 via bootstrap.sh)
 - [ ] Blob Storage with immutability policy on `backups` container *(Session 10)*
-- [x] **App Service Plan (B2 for dev, P1v3 for prod)** — PR #13
-- [x] **Two App Services (web + api)** — PR #13
+- [x] **App Service Plan (B2 for dev, P1v3 for prod)** — PR #13 merged
+- [x] **Two App Services (web + api)** — PR #13 merged (App Service VNet integration in Session 10)
 - [ ] Application Insights + Log Analytics *(Session 11)*
 - [ ] Communication Services with Email domain *(Session 11)*
 - [ ] Container Apps environment for cron jobs *(Session 10)*
@@ -448,12 +450,12 @@ shred raw file from Blob after 30 days (lifecycle policy)
 **Code (Claude Code):**
 
 - [x] **FastAPI scaffold: `/health`, `/ready`, MSAL JWT dep, OpenAPI** — PR #8 merged
-- [x] **Next.js scaffold: Tailwind, Tremor, shadcn/ui, MSAL.js, middleware** — Sessions 1–6, MSAL wiring in PR #9 (open)
+- [x] **Next.js scaffold: Tailwind, Tremor, shadcn/ui, MSAL.js, middleware** — PR #9 merged
 - [x] **SQLAlchemy models for all schemas, every column `data_class`-tagged** — Session 1 merged
 - [x] **Alembic initial migration + seed script (11 sites from HTML)** — Session 1 merged
 - [x] **Audit log event listener wired + tested** — replaced by Postgres triggers in PR #7 merged
 - [ ] Backup Container Apps Job: `pg_dump` → Blob with immutability, tested via restore drill *(Session 10)*
-- [ ] CI pipeline: lint, typecheck, pytest, schema classification test *(Session 9 — alongside GitHub Actions OIDC)*
+- [x] **CI pipeline: lint, typecheck, pytest, schema classification test** — PR #14 merged
 - [x] **ADR-001 committed** — Session 1 merged
 
 **Engineering gate (you alone):** deploy via `az deployment group create`; sign in via Microsoft; overview renders with 11 seeded sites; enter a Westside census → persists; audit log captures insert; manual backup job succeeds; restore drill from backup succeeds; row counts match.

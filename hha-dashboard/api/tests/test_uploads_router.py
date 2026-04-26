@@ -28,7 +28,7 @@ def mock_blob(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_non_owner_role(mock_blob, monkeypatch):
+async def test_upload_rejects_non_owner_role(mock_blob, monkeypatch):  # noqa: ARG001
     """A 'finance_analyst' role (not in the owner_* list) gets 403.
 
     Note: dev stub accepts any role in VALID_DEV_ROLES; we use an invalid role

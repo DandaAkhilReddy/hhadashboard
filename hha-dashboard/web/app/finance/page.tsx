@@ -2,7 +2,7 @@ import { SourceTag } from "@/components/Badge";
 import { Card, CardHeader } from "@/components/Card";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
-import { api, type ArBuckets } from "@/lib/api-client";
+import { type ArBuckets, api } from "@/lib/api-client";
 import { pct, usd } from "@/lib/format";
 
 const BUCKET_LABELS: Array<[keyof ArBuckets, string]> = [
@@ -12,7 +12,13 @@ const BUCKET_LABELS: Array<[keyof ArBuckets, string]> = [
   ["bucket_91_120", "91-120"],
   ["bucket_over_120", ">120"],
 ];
-const BUCKET_COLORS = ["bg-emerald-500", "bg-emerald-400", "bg-amber-400", "bg-amber-500", "bg-red-500"];
+const BUCKET_COLORS = [
+  "bg-emerald-500",
+  "bg-emerald-400",
+  "bg-amber-400",
+  "bg-amber-500",
+  "bg-red-500",
+];
 const BUCKET_HEIGHTS_PX = [64, 48, 36, 28, 56];
 
 export default async function FinancePage() {
@@ -31,8 +37,7 @@ export default async function FinancePage() {
         title="Finance · HHA Top-Line"
         subtitle={
           <>
-            Revenue in + AR aging ·{" "}
-            <strong>No denial analytics — Ventra&apos;s scope</strong>
+            Revenue in + AR aging · <strong>No denial analytics — Ventra&apos;s scope</strong>
           </>
         }
       />
@@ -79,9 +84,15 @@ export default async function FinancePage() {
             right={<SourceTag source={aging.fl_source_system} />}
           />
 
-          <BucketChart label="FLORIDA" buckets={aging.fl_buckets} over120Pct={aging.fl_over_120_pct} />
+          <BucketChart
+            label="FLORIDA"
+            buckets={aging.fl_buckets}
+            over120Pct={aging.fl_over_120_pct}
+          />
           <div className="mt-4 flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">TEXAS</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              TEXAS
+            </span>
             <SourceTag source={aging.tx_source_system} />
           </div>
           <BucketChart
@@ -115,7 +126,11 @@ export default async function FinancePage() {
                 const h = Math.max(4, Math.round((m.revenue_usd / trendMax) * 72));
                 const isCurrent = m === trend[trend.length - 1];
                 return (
-                  <div key={m.month} className="flex-1 text-center" title={`${m.month}: ${usd(m.revenue_usd)}`}>
+                  <div
+                    key={m.month}
+                    className="flex-1 text-center"
+                    title={`${m.month}: ${usd(m.revenue_usd)}`}
+                  >
                     <div
                       className={`mx-auto rounded ${isCurrent ? "bg-red-500" : "bg-indigo-500"}`}
                       style={{ height: `${h}px` }}
@@ -138,10 +153,10 @@ export default async function FinancePage() {
             i
           </div>
           <div className="text-sm text-slate-600">
-            <strong>Denial analytics are out of scope.</strong> HHA contracted the full RCM cycle
-            to Ventra. Claim-level data, denial categories, appeals workflow, coding accuracy,
-            timely filing, charge lag, clean claim rate — all live in Ventra&apos;s portal. This
-            dashboard only surfaces HHA&apos;s top-line: money coming in, AR owed.
+            <strong>Denial analytics are out of scope.</strong> HHA contracted the full RCM cycle to
+            Ventra. Claim-level data, denial categories, appeals workflow, coding accuracy, timely
+            filing, charge lag, clean claim rate — all live in Ventra&apos;s portal. This dashboard
+            only surfaces HHA&apos;s top-line: money coming in, AR owed.
           </div>
         </div>
       </Card>
@@ -180,7 +195,8 @@ function BucketChart({
         ))}
       </div>
       <div className="mt-2 text-xs text-slate-500">
-        &gt;120d = <span className="font-bold text-red-600">{pct(over120Pct)}</span> · target &lt;15%
+        &gt;120d = <span className="font-bold text-red-600">{pct(over120Pct)}</span> · target
+        &lt;15%
       </div>
     </div>
   );

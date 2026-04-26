@@ -23,7 +23,6 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any
 
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeResult

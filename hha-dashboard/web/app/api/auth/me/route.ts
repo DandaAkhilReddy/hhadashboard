@@ -14,13 +14,9 @@
  * just the failure category, never user-identifying content.
  */
 
+import { SESSION_COOKIE_NAME, decryptSession, isSessionExpired } from "@/lib/auth/session-crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import {
-  decryptSession,
-  isSessionExpired,
-  SESSION_COOKIE_NAME,
-} from "@/lib/auth/session-crypto";
 
 export const runtime = "nodejs";
 
@@ -78,13 +74,13 @@ function extractUpn(claims: Record<string, unknown>): string {
 }
 
 function extractName(claims: Record<string, unknown>): string {
-  const name = claims["name"];
+  const name = claims.name;
   if (typeof name === "string" && name) return name;
   return extractUpn(claims);
 }
 
 function extractRoles(claims: Record<string, unknown>): string[] {
-  const groups = claims["groups"];
+  const groups = claims.groups;
   if (!Array.isArray(groups)) return [];
   const map = buildGroupRoleMap();
   const roles = new Set<string>();

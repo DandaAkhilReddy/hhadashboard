@@ -41,6 +41,18 @@ param plan_sku_name = 'P1v3'
 param plan_sku_tier = 'PremiumV3'
 param worker_count = 2
 
+// VNet + Key Vault — both ON in prod.
+//   - VNet: 10.20.0.0/16 with 3 subnets, 2 private DNS zones
+//   - Postgres injected into the postgres subnet (no public address)
+//   - Key Vault reachable via private endpoint in the PE subnet
+// Adds ~$30/mo in eastus2 for the VNet + 2 PEs + 2 DNS zones.
+//
+// azure_tenant_id_for_kv must be a real value at deploy time — KV requires
+// the tenant ID even with RBAC. Override via -p at deploy if not set here.
+param enable_vnet = true
+param enable_keyvault = true
+param azure_tenant_id_for_kv = ''
+
 // Entra IDs — populate from the prod app registrations.
 // Override at deploy time if these aren't yet committed.
 param azure_tenant_id = ''

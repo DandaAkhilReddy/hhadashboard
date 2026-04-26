@@ -88,6 +88,15 @@ param entra_groups object = {
   owner_hr: ''
 }
 
+@description('Enable VNet + private DNS zones. When true, Postgres switches to VNet injection (no public access). When false, the v0 public-with-firewall posture from Session 8 stays.')
+param enable_vnet bool = false
+
+@description('Enable Key Vault module. Creates an empty vault with private endpoint (when enable_vnet is also true) or public-with-IP-allowlist (when enable_vnet is false). Initial secrets are seeded out-of-band by bootstrap.sh in Session 10.')
+param enable_keyvault bool = false
+
+@description('Microsoft Entra tenant id for Key Vault RBAC. Required when enable_keyvault is true.')
+param azure_tenant_id_for_kv string = ''
+
 @description('Tags applied to every resource.')
 param tags object = {
   project: 'hha-dashboard'
@@ -105,10 +114,24 @@ var plan_name = 'plan-hha-${env_name}'
 var web_name = 'app-hha-web-${env_name}'
 var api_name = 'app-hha-api-${env_name}'
 var database_name = 'hha_dashboard'
+var vnet_name = 'vnet-hha-${env_name}'
+var kv_name = 'kv-hha-${env_name}'
 
 // ---------------------------------------------------------------------------
 // Modules
 // ---------------------------------------------------------------------------
+
+// VNet + private DNS zones — only deployed when enable_vnet is true. The
+// outputs are referenced conditionally below; downstream modules consume
+// the subnet/zone IDs only when vnet exists.
+module vnet './modules/vnet.bicep' = if (enable_vnet) {
+  name: 'vnet-deploy'
+  params: {
+    name: vnet_name
+    location: location
+    tags: tags
+  }
+}
 
 module postgres './modules/postgres.bicep' = {
   name: 'postgres-deploy'
@@ -124,6 +147,25 @@ module postgres './modules/postgres.bicep' = {
     admin_password: postgres_admin_password
     database_name: database_name
     deployer_workstation_ip: deployer_workstation_ip
+    delegated_subnet_id: enable_vnet ? vnet!.outputs.postgres_subnet_id : ''
+    private_dns_zone_id: enable_vnet ? vnet!.outputs.pg_dns_zone_id : ''
+    tags: tags
+  }
+}
+
+// Key Vault — only deployed when enable_keyvault is true. When VNet is also
+// on, the vault gets a private endpoint in the PE subnet and goes private.
+// When VNet is off, the vault stays public with a network-ACL default-deny
+// + the deployer workstation IP allowlist.
+module keyvault './modules/keyvault.bicep' = if (enable_keyvault) {
+  name: 'keyvault-deploy'
+  params: {
+    name: kv_name
+    location: location
+    tenant_id: azure_tenant_id_for_kv
+    deployer_workstation_ip: deployer_workstation_ip
+    pe_subnet_id: enable_vnet ? vnet!.outputs.pe_subnet_id : ''
+    dns_zone_id: enable_vnet ? vnet!.outputs.kv_dns_zone_id : ''
     tags: tags
   }
 }
@@ -224,3 +266,15 @@ output web_principal_id string = appservice.outputs.web_principal_id
 
 @description('API app system-assigned managed identity principal ID.')
 output api_principal_id string = appservice.outputs.api_principal_id
+
+@description('Key Vault URI when enable_keyvault is true; empty otherwise. Use as the base URI for @Microsoft.KeyVault(...) app_settings references after bootstrap.sh seeds the secrets in Session 10.')
+output vault_uri string = enable_keyvault ? keyvault!.outputs.vault_uri : ''
+
+@description('Key Vault name when enable_keyvault is true; empty otherwise. Used by bootstrap.sh and by the App Service RBAC role assignment in Session 10.')
+output vault_name string = enable_keyvault ? keyvault!.outputs.vault_name : ''
+
+@description('VNet resource ID when enable_vnet is true; empty otherwise. Used by Session 10 to wire App Service VNet integration.')
+output vnet_id string = enable_vnet ? vnet!.outputs.vnet_id : ''
+
+@description('App subnet ID when enable_vnet is true; empty otherwise. App Service VNet integration in Session 10 attaches here.')
+output app_subnet_id string = enable_vnet ? vnet!.outputs.app_subnet_id : ''

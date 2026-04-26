@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { FileDrop } from "@/components/FileDrop";
 import { toast } from "@/components/Toast";
-import { useApiBrowser, type FileType, type UploadRow } from "@/lib/api-browser";
+import { type FileType, type UploadRow, useApiBrowser } from "@/lib/api-browser";
 import { cn } from "@/lib/format";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // ---- Client-side filename → file_type inference ----
 
@@ -109,7 +109,9 @@ export function UploadDropZone({ initialUploads }: { initialUploads: UploadRow[]
 
   const updateStagedType = (localId: number, fileType: FileType) => {
     setStaged((prev) =>
-      prev.map((s) => (s.localId === localId ? { ...s, fileType, confidenceAutoDetected: false } : s)),
+      prev.map((s) =>
+        s.localId === localId ? { ...s, fileType, confidenceAutoDetected: false } : s,
+      ),
     );
   };
 
@@ -131,10 +133,7 @@ export function UploadDropZone({ initialUploads }: { initialUploads: UploadRow[]
     setUploading(false);
 
     if (succeeded > 0) {
-      toast(
-        `${succeeded} file(s) uploaded. Will be processed within 15 minutes.`,
-        "success",
-      );
+      toast(`${succeeded} file(s) uploaded. Will be processed within 15 minutes.`, "success");
       setStaged([]);
       // Refresh the recent-uploads list immediately
       try {
@@ -200,9 +199,7 @@ export function UploadDropZone({ initialUploads }: { initialUploads: UploadRow[]
             ))}
             <div className="flex items-center justify-between pt-2">
               <div className="text-xs text-slate-500">
-                {allReady
-                  ? "Ready to upload."
-                  : "Pick a type for each file before uploading."}
+                {allReady ? "Ready to upload." : "Pick a type for each file before uploading."}
               </div>
               <button
                 type="button"
@@ -215,7 +212,9 @@ export function UploadDropZone({ initialUploads }: { initialUploads: UploadRow[]
                     : "bg-slate-900 hover:bg-slate-800",
                 )}
               >
-                {uploading ? "Uploading..." : `Upload ${staged.length} file${staged.length === 1 ? "" : "s"}`}
+                {uploading
+                  ? "Uploading..."
+                  : `Upload ${staged.length} file${staged.length === 1 ? "" : "s"}`}
               </button>
             </div>
           </div>
@@ -223,12 +222,11 @@ export function UploadDropZone({ initialUploads }: { initialUploads: UploadRow[]
       </Card>
 
       <Card>
-        <CardHeader
-          title="Recent uploads"
-          owner="Last 50 · polls every 30s"
-        />
+        <CardHeader title="Recent uploads" owner="Last 50 · polls every 30s" />
         {uploads.length === 0 ? (
-          <div className="text-sm text-slate-500 py-4">No uploads yet. Drop a file above to get started.</div>
+          <div className="text-sm text-slate-500 py-4">
+            No uploads yet. Drop a file above to get started.
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -254,25 +252,39 @@ export function UploadDropZone({ initialUploads }: { initialUploads: UploadRow[]
                       <td className="py-2.5 font-medium text-slate-900 max-w-[300px] truncate">
                         {u.original_filename}
                       </td>
-                      <td className="py-2.5 text-xs text-slate-500">{FILE_TYPE_LABELS[u.file_type as FileType] ?? u.file_type}</td>
+                      <td className="py-2.5 text-xs text-slate-500">
+                        {FILE_TYPE_LABELS[u.file_type as FileType] ?? u.file_type}
+                      </td>
                       <td className="py-2.5 text-xs text-slate-500">{humanBytes(u.size_bytes)}</td>
                       <td className="py-2.5">
-                        <span className={cn("inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold", statusInfo.className)}>
+                        <span
+                          className={cn(
+                            "inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                            statusInfo.className,
+                          )}
+                        >
                           {statusInfo.label}
                         </span>
                         {u.status === "error" && u.error_message ? (
-                          <div className="mt-0.5 text-[10px] text-red-600 max-w-[240px] truncate" title={u.error_message}>
+                          <div
+                            className="mt-0.5 text-[10px] text-red-600 max-w-[240px] truncate"
+                            title={u.error_message}
+                          >
                             {u.error_message}
                           </div>
                         ) : null}
                         {u.retry_count > 0 && u.status !== "processed" ? (
-                          <div className="mt-0.5 text-[10px] text-slate-500">retry {u.retry_count}/3</div>
+                          <div className="mt-0.5 text-[10px] text-slate-500">
+                            retry {u.retry_count}/3
+                          </div>
                         ) : null}
                       </td>
                       <td className="py-2.5 text-xs text-slate-500 tabular-nums">
                         {u.rows_written ?? "—"}
                       </td>
-                      <td className="py-2.5 text-xs text-slate-500">{relativeTime(u.uploaded_at)}</td>
+                      <td className="py-2.5 text-xs text-slate-500">
+                        {relativeTime(u.uploaded_at)}
+                      </td>
                       <td className="py-2.5 text-xs text-slate-500 max-w-[160px] truncate">
                         {u.uploaded_by_upn}
                       </td>

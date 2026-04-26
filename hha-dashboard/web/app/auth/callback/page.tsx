@@ -10,10 +10,10 @@
  *   4. router.replace(returnTo) → user lands on the page they wanted
  */
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useMsal } from "@azure/msal-react";
 import { apiScope, isMsalConfigured } from "@/lib/auth/msal-config";
+import { useMsal } from "@azure/msal-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 async function postSession(accessToken: string, expiresAt: number): Promise<void> {
   const res = await fetch("/api/auth/session", {

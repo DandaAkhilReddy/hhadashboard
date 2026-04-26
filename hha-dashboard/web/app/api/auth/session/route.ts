@@ -14,13 +14,13 @@
  * endpoint just stores what the browser-side MSAL flow handed us.
  */
 
-import { NextResponse } from "next/server";
 import {
-  encryptSession,
-  isSessionExpired,
   SESSION_COOKIE_NAME,
   type Session,
+  encryptSession,
+  isSessionExpired,
 } from "@/lib/auth/session-crypto";
+import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
