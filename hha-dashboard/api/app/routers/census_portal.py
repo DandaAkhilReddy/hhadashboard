@@ -128,6 +128,40 @@ async def login(
     )
 
 
+@router.get("/sites", response_model=PortalLoginOut)
+async def list_sites_with_today(
+    db: DBDep,
+    cred: CredentialDep,
+) -> PortalLoginOut:
+    """Return the same prefill payload as /login so the entry page can render
+    after a refresh without re-authenticating.
+
+    Returns ONLY facility names + today's already-entered numbers. No
+    operational data (no scorecards, finance, clinical, etc.) — keeps the
+    portal's read surface narrow and predictable.
+    """
+    _ = cred
+    sites = (await db.execute(select(Site).order_by(Site.name))).scalars().all()
+    today = datetime.now(UTC).date()
+    existing = (
+        await db.execute(select(DailyEntry).where(DailyEntry.entry_date == today))
+    ).scalars().all()
+    by_site = {e.site_id: e for e in existing}
+    return PortalLoginOut(
+        entry_date=today,
+        sites=[
+            PortalSiteOut(
+                site_id=s.id,
+                site_name=s.name,
+                state=s.state,
+                census=by_site[s.id].census if s.id in by_site else None,
+                open_shifts=by_site[s.id].open_shifts if s.id in by_site else 0,
+            )
+            for s in sites
+        ],
+    )
+
+
 @router.post("/logout")
 async def logout(
     db: DBDep,

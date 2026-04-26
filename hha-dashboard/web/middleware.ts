@@ -4,39 +4,64 @@ import type { NextRequest } from "next/server";
 /**
  * Auth gate (presence check only).
  *
- * Runs on every request. In dev mode (NEXT_PUBLIC_AUTH_MODE=dev) we let
- * everything through — local dev doesn't need a sign-in. In prod, we look
- * for the hha_session cookie. If absent and the path isn't an /auth/* page
- * or the /api/auth/* route handlers, redirect to /auth/sign-in with the
- * original path captured in `?return=`.
+ * Two independent surfaces share this middleware:
  *
- * We deliberately don't decrypt the cookie here — that adds a Web Crypto
- * call to every request. Token-expiry redirects are handled later, when
- * the server-component fetcher tries to use the stale token and the
- * fetchOrSignIn helper bounces to /auth/sign-in.
+ * 1. **Dashboard** (Entra-gated). In dev (NEXT_PUBLIC_AUTH_MODE=dev) we let
+ *    everything through. In prod we look for the `hha_session` cookie. If
+ *    absent and the path isn't an /auth/* page or /api/auth/* route, we
+ *    redirect to /auth/sign-in with `?return=`.
+ *
+ * 2. **Census portal** (separate single-credential login). Always on,
+ *    regardless of AUTH_MODE — the portal is the same in dev and prod since
+ *    it's not Entra-backed. We look for the `census_session` cookie. If
+ *    absent and the path isn't /census/login, redirect to /census/login.
+ *
+ * Token-expiry / session-invalid redirects are handled by the API itself
+ * (returns 401 → server pages redirect via cookies()). This middleware
+ * does only presence checks.
  */
 
-const SESSION_COOKIE = "hha_session";
+const DASHBOARD_COOKIE = "hha_session";
+const CENSUS_COOKIE = "census_session";
 const AUTH_MODE = process.env.NEXT_PUBLIC_AUTH_MODE ?? "dev";
 
-const PUBLIC_PREFIXES = ["/auth/", "/api/auth/"];
+const DASHBOARD_PUBLIC_PREFIXES = ["/auth/", "/api/auth/"];
 
-function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
+function isCensusPath(pathname: string): boolean {
+  return pathname.startsWith("/census");
+}
+
+function isDashboardPublicPath(pathname: string): boolean {
+  return DASHBOARD_PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
 export function middleware(request: NextRequest): NextResponse {
+  const { pathname } = request.nextUrl;
+
+  // ---- Census portal branch — independent of AUTH_MODE ----
+  if (isCensusPath(pathname)) {
+    if (pathname === "/census/login" || pathname === "/census") {
+      return NextResponse.next();
+    }
+    if (request.cookies.has(CENSUS_COOKIE)) {
+      return NextResponse.next();
+    }
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/census/login";
+    loginUrl.search = "";
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // ---- Dashboard branch ----
   if (AUTH_MODE === "dev") {
     return NextResponse.next();
   }
 
-  const { pathname } = request.nextUrl;
-  if (isPublicPath(pathname)) {
+  if (isDashboardPublicPath(pathname)) {
     return NextResponse.next();
   }
 
-  const hasCookie = request.cookies.has(SESSION_COOKIE);
-  if (hasCookie) {
+  if (request.cookies.has(DASHBOARD_COOKIE)) {
     return NextResponse.next();
   }
 
