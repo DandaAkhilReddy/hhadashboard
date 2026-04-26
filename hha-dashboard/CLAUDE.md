@@ -98,12 +98,41 @@ Absolute rules:
 - `vitest` for unit, Playwright for critical user paths (sign-in, role-gated routes, entry forms)
 - Tailwind only; never inline styles; shadcn/Tremor components over hand-rolled
 
+#### API client split (server vs browser)
+
+Per Session 6 (PR #9 merged):
+
+- **Server components** import from `@/lib/api-client` — Node-only module that reads the encrypted `hha_session` cookie via `cookies()` from `next/headers` and forwards it as `Authorization: Bearer`.
+- **Client components** (entry forms) import `useApiBrowser` from `@/lib/api-browser` — uses MSAL `acquireTokenSilent` directly. **They never read the cookie** (echoing httpOnly cookies to JS is an XSS exfil primitive).
+- Both share the pure fetcher in `@/lib/api-fetch.ts`. Auth header is injected; the fetcher knows nothing about cookies or MSAL.
+- Don't import `next/headers` in any `"use client"` file — Next will hard-error at build.
+
+### Bicep / IaC (infra/)
+
+Per Session 8 (PR #13 merged) and Session 9 (PR #15 in flight):
+
+- All Bicep files compile-checked in CI (`.github/workflows/ci.yml` bicep job). Locally: `az bicep build` + `az bicep build-params` + `az bicep lint`.
+- **Network posture is parameter-driven**: `enable_vnet` toggle in `main.bicep`. `false` (dev default) keeps Postgres public-with-firewall. `true` (prod default) switches Postgres to VNet injection (no public address).
+- **`postgres.bicep` and `appservice.bicep` are backward-compatible** — new VNet/KV parameters default to empty/false. Adding a Bicep module = parameterize, never break the existing dev posture.
+- **No `0.0.0.0` AllowAllAzureServices firewall rule** anywhere in the templates. HIPAA auditor flag.
+- **Connection strings are composed in `main.bicep`, not output by modules.** Secrets never reach module outputs (which are visible to RG Reader).
+- **BCP178 limitation**: Bicep can't drive a resource loop count from a deploy-time output (e.g. App Service `outboundIpAddresses`). Workaround: post-deploy `az` CLI snippet documented in `infra/README.md`.
+
 ### SQL / migrations
 
 - Alembic co-located at `api/alembic/`
 - Every migration has `downgrade()` that works
 - Schema changes run in dev first, then staging, then prod with manual approval
 - Migration touching sensitive tables requires ADR update
+- **Audit triggers** (PR #7 merged) on every table in `services/audit.py::AUDITED_TABLES` — adding a new audited table requires updating that frozenset AND adding it to the trigger migration
+
+### Repository layout gotcha
+
+The git repo root is `HHA_Dashboard_New_Joey/`, **not** `hha-dashboard/`. Confirmed via `git rev-parse --show-toplevel`. Two `.gitignore` files apply:
+- `HHA_Dashboard_New_Joey/.gitignore` — repo-root, broad rules
+- `HHA_Dashboard_New_Joey/hha-dashboard/.gitignore` — codebase-scoped rules
+
+When adding new gitignore patterns, decide which level they belong at. The Python `env/` rule that matched `infra/env/` was the canonical example (caught and scoped in the Session 8 PR).
 
 ## Commit conventions
 
