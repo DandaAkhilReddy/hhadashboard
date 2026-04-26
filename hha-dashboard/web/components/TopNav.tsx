@@ -34,6 +34,12 @@ export function TopNav() {
   const pathname = usePathname();
   const { user } = useUser();
 
+  // The /census/* portal is a stripped-down separate auth surface — no
+  // dashboard nav, no role badges. Hide TopNav entirely there.
+  if (pathname?.startsWith("/census")) {
+    return null;
+  }
+
   const displayName =
     user?.authenticated === true
       ? user.name || user.upn

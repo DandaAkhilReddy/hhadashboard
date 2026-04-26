@@ -15,6 +15,7 @@ from .core.logging import configure_logging, get_logger
 from .deps import engine, get_current_user
 from .routers import (
     alerts,
+    census_portal,
     clinical,
     entries,
     finance,
@@ -113,3 +114,4 @@ app.include_router(scorecards.router)
 app.include_router(alerts.router)
 app.include_router(uploads.router)
 app.include_router(entries.router)
+app.include_router(census_portal.router)
