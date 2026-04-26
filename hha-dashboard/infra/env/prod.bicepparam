@@ -69,6 +69,12 @@ param storage_soft_delete_retention_days = 90
 param enable_monitor = true
 param monitor_retention_days = 90
 
+// Email — ON in prod. ACS + Email Communications Service with an Azure
+// Managed Domain (sender DoNotReply@<random>.azurecomm.net). Daily 7am
+// digest + credential expiry alerts route through here. Custom domain
+// attachment (alerts@hhamedicine.com) is a follow-up.
+param enable_email = true
+
 // Entra IDs — populate from the prod app registrations.
 // Override at deploy time if these aren't yet committed.
 param azure_tenant_id = ''

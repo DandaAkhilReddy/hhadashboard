@@ -117,6 +117,9 @@ param storage_sku string = 'Standard_LRS'
 @maxValue(365)
 param storage_soft_delete_retention_days int = 7
 
+@description('Enable Azure Communication Services (Email) for the daily 7am exec digest + credential expiry alerts. Uses an Azure Managed Domain in v0 (sender DoNotReply@<random>.azurecomm.net); custom domain attachment is a follow-up.')
+param enable_email bool = false
+
 @description('Microsoft Entra tenant id for Key Vault RBAC. Required when enable_keyvault is true.')
 param azure_tenant_id_for_kv string = ''
 
@@ -141,6 +144,8 @@ var vnet_name = 'vnet-hha-${env_name}'
 var kv_name = 'kv-hha-${env_name}'
 var log_analytics_name = 'log-hha-${env_name}'
 var app_insights_name = 'appi-hha-${env_name}'
+var acs_name = 'acs-hha-${env_name}'
+var email_service_name = 'ecs-hha-${env_name}'
 
 // ---------------------------------------------------------------------------
 // Modules
@@ -228,6 +233,20 @@ module monitor './modules/monitor.bicep' = if (enable_monitor) {
   }
 }
 
+// ACS + Email — only deployed when enable_email is true. The api uses
+// AZURE_COMMUNICATION_ENDPOINT + the system-assigned managed identity
+// (after a future RBAC role assignment) to send the 7am digest. v0 uses
+// an Azure Managed Domain (sender DoNotReply@<random>.azurecomm.net);
+// custom domain attachment is a follow-up.
+module acsEmail './modules/acs-email.bicep' = if (enable_email) {
+  name: 'acs-email-deploy'
+  params: {
+    acs_name: acs_name
+    email_service_name: email_service_name
+    tags: tags
+  }
+}
+
 // Compose connection strings.
 //
 // App Service resolves `@Microsoft.KeyVault(...)` references only when the
@@ -272,7 +291,9 @@ var api_app_settings = union(common_app_settings, {
   AZURE_STORAGE_ACCOUNT_URL: enable_storage ? storage!.outputs.blob_endpoint : ''
   AZURE_STORAGE_UPLOADS_CONTAINER: enable_storage ? storage!.outputs.uploads_container_name : 'uploads'
   APPLICATIONINSIGHTS_CONNECTION_STRING: enable_monitor ? monitor!.outputs.app_insights_connection_string : ''
-  // Defer to Session 12+: ACS connection, Doc Intelligence endpoint
+  AZURE_COMMUNICATION_ENDPOINT: enable_email ? acsEmail!.outputs.acs_endpoint : ''
+  AZURE_COMMUNICATION_SENDER: enable_email ? acsEmail!.outputs.sender_address : ''
+  // Defer to Session 13+: Doc Intelligence endpoint
 })
 
 var web_app_settings = union(common_app_settings, {
@@ -580,3 +601,9 @@ output storage_blob_endpoint string = enable_storage ? storage!.outputs.blob_end
 
 @description('Storage account name when enable_storage is true; empty otherwise. Used by bootstrap/operator commands that target the account directly (e.g. setting the immutability lock on the backups container).')
 output storage_account_name string = enable_storage ? storage!.outputs.storage_name : ''
+
+@description('ACS endpoint URL when enable_email is true; empty otherwise. The api uses this as AZURE_COMMUNICATION_ENDPOINT for the SDK client.')
+output acs_endpoint string = enable_email ? acsEmail!.outputs.acs_endpoint : ''
+
+@description('Sender address from the Azure Managed Domain when enable_email is true; empty otherwise.')
+output acs_sender_address string = enable_email ? acsEmail!.outputs.sender_address : ''
