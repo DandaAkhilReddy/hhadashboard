@@ -17,7 +17,8 @@ __pycache__/
 .Python
 venv/
 .venv/
-env/
+api/env/
+jobs/*/env/
 .env.local
 *.egg-info/
 *.egg
