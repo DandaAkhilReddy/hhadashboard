@@ -7,6 +7,7 @@ Importing any model module registers it on Base.metadata. The test imports
 every model module explicitly so the whole schema is visible to the check.
 """
 
+from .alerts import AlertLog, AlertSubscription, CredentialAlertLog
 from .audit import AuditLog
 from .base import Base, DataClass, TimestampMixin
 from .census_credentials import CensusCredential
@@ -17,9 +18,12 @@ from .entries_hr import WeeklyHrManual
 from .uploads import UploadLog
 
 __all__ = [
+    "AlertLog",
+    "AlertSubscription",
     "AuditLog",
     "Base",
     "CensusCredential",
+    "CredentialAlertLog",
     "DailyEntry",
     "DataClass",
     "MonthlyFinanceManual",

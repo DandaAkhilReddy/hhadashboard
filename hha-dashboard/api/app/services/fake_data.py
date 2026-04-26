@@ -680,9 +680,11 @@ def get_scorecards(*, include_comp_detail: bool = False) -> list[dict]:
 
 
 def get_current_alerts(today: date | None = None) -> list[dict]:
-    today = today or date.today()
-    fin = get_finance_today(today)
-    shortfall = FL_DAILY_TARGET - fin["fl_daily_actual"]
+    """Hardcoded fallback alerts. Used by `routers/alerts.py` only when the
+    real `services.alert_engine.compute_alerts_for_date` returns empty
+    (genuine quiet day OR pre-seed environment). Numbers below are
+    illustrative — real values come from the engine when entries land."""
+    _ = today  # accepted for API compat with the engine signature
     return [
         {
             "id": "fl-collections-below-target",
@@ -690,8 +692,8 @@ def get_current_alerts(today: date | None = None) -> list[dict]:
             "category": "finance",
             "title": "FL collections below target",
             "detail": (
-                f"Today ${fin['fl_daily_actual']:,} vs ${FL_DAILY_TARGET:,} target "
-                f"— shortfall ${shortfall:,}/day"
+                f"Demo: shortfall against ${FL_DAILY_TARGET:,}/day target "
+                f"(real number lands once engine ingests last month's finance)"
             ),
             "owner": "Sandy Collins · Maribel Reyes",
         },
