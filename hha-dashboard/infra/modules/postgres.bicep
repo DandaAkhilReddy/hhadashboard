@@ -50,11 +50,19 @@ param admin_password string
 @description('Logical database to create on the server. Matches docker-compose.')
 param database_name string = 'hha_dashboard'
 
-@description('Deployer workstation IP for the firewall allowlist. No 0.0.0.0 rule is created.')
+@description('Deployer workstation IP for the firewall allowlist. Only used in public mode (when delegated_subnet_id is empty). No 0.0.0.0 rule is created.')
 param deployer_workstation_ip string
+
+@description('Delegated subnet resource ID for VNet injection. When non-empty, the server gets a private NIC in this subnet and publicNetworkAccess flips to Disabled. When empty, the server stays public with the deployer firewall rule (Session 8 behavior).')
+param delegated_subnet_id string = ''
+
+@description('Private DNS zone resource ID for privatelink.postgres.database.azure.com. Required when delegated_subnet_id is non-empty.')
+param private_dns_zone_id string = ''
 
 @description('Tags to apply to the server.')
 param tags object = {}
+
+var private_mode = !empty(delegated_subnet_id)
 
 resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   name: name
@@ -79,7 +87,11 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
     highAvailability: {
       mode: ha_mode
     }
-    network: {
+    network: private_mode ? {
+      publicNetworkAccess: 'Disabled'
+      delegatedSubnetResourceId: delegated_subnet_id
+      privateDnsZoneArmResourceId: private_dns_zone_id
+    } : {
       publicNetworkAccess: 'Enabled'
     }
     authConfig: {
@@ -109,10 +121,11 @@ resource db 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
   }
 }
 
-// Single firewall rule for the deployer workstation. The App Service outbound
-// IP allowlist is added by main.bicep after appservice deploys (deferred-output
-// pattern handled there).
-resource fwDeployer 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = {
+// Single firewall rule for the deployer workstation. Only created in public
+// mode — VNet injection has no notion of public IP allowlists. The App
+// Service outbound IP allowlist is added by main.bicep after appservice
+// deploys (deferred-output pattern documented in infra/README.md).
+resource fwDeployer 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = if (!private_mode) {
   parent: server
   name: 'deployer-workstation'
   properties: {
