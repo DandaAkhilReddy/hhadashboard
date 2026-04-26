@@ -12,9 +12,10 @@ Six PRs landed in flight today, all merged in the same session. Plus a follow-on
 | #12 | `chore/web-bump-vitest` | chore(web): bump vitest 2.1.6 → 4.1.5 (security backport) | 20 vitests on rebase | ~3,800 lockfile | merged |
 | #13 | `feat/session-8-bicep-scaffold` | feat(infra): Bicep scaffold — postgres + app service (compile-only) | `az bicep build` + `lint` clean | ~700 | merged |
 | #14 | `ci/github-actions-base` | ci: GitHub Actions workflow (api + web + bicep) | (workflow YAML, runs on every PR) | ~150 | merged |
-| #15 | `feat/session-9-vnet-keyvault` | feat(infra): VNet + Key Vault Bicep modules (compile-only) | `az bicep build` + `lint` clean | ~500 | open (autonomous block) |
+| #15 | `feat/session-9-vnet-keyvault` | feat(infra): VNet + Key Vault Bicep modules (compile-only) | `az bicep build` + `lint` clean | ~500 | merged |
+| #16 | `feat/session-10-close-deploy-loop` | feat(infra): close the deploy loop — App Service VNet integration + KV refs + RBAC + bootstrap.sh | `az bicep build` + `lint` clean | ~250 | open (autonomous block) |
 
-Combined: **41 new tests, 7 new infra/feature modules, 1 CI workflow, 0 critical advisories remaining.**
+Combined: **41 new tests, 8 infra/feature modules, 1 CI workflow, 1 bootstrap script, 0 critical advisories remaining.**
 
 ## What each PR delivers
 
@@ -84,6 +85,19 @@ infra/
 2. **Repo-root `.gitignore`** had unscoped `env/` (Python venv pattern) shadowing `infra/env/`. Fixed in the same PR — scoped to `hha-dashboard/api/env/` and `hha-dashboard/jobs/*/env/`.
 
 Verification = `az bicep build` + `az bicep build-params` + `az bicep lint` only. **No live deploy** — explicitly out of scope.
+
+### PR #16 — Close the deploy loop (Session 10, autonomous block)
+
+Three additions in `main.bicep` plus one new file:
+
+1. **App Service VNet integration** — `appservice.bicep` accepts an optional `app_subnet_id`. When set, both web + api sites get `virtualNetworkSubnetId` plus `siteConfig.vnetRouteAllEnabled`. `main.bicep` threads `vnet.outputs.app_subnet_id` through when `enable_vnet=true`. Closes the Session 9 gap: App Service can now reach private Postgres.
+2. **KV → App Service RBAC role assignments** — two `Microsoft.Authorization/roleAssignments` granting `Key Vault Secrets User` (`4633458b-17de-408a-b874-0445c86b69e6`) to each App Service MI on the vault scope. `guid()` seeded with `(kv_name, app_name, role_id)` for deterministic + idempotent assignment names (deploy-time module outputs can't drive resource names — BCP120).
+3. **KV references in `app_settings`** — when `enable_keyvault=true`, `DATABASE_URL` + `DATABASE_URL_SYNC` switch from literal connection strings to `@Microsoft.KeyVault(VaultName=…;SecretName=database-url[-sync])`. App Service resolves the WHOLE app_setting value (not substrings), so the secrets in KV are the full connection strings, not just the password.
+4. **`bootstrap.sh`** — idempotent bash script that generates a 24-byte postgres password, writes the three secrets KV references expect (`postgres-admin-password`, `database-url`, `database-url-sync`), and restarts both App Services so the references resolve immediately. Includes pre-flight checks (`az` logged in, RG exists, vault exists) and prints the OIDC federated credential setup as commented next-steps for Session 11.
+
+`infra/README.md` replaces the "known temporary gap" callout with a 2-phase deploy procedure (Phase 1 = `az deployment group create`, Phase 2 = `bootstrap.sh`).
+
+Verification = compile-only (`az bicep build` + `lint`). All 5 .bicep files green. CI auto-runs the bicep + api + web jobs on push.
 
 ### PR #15 — VNet + Key Vault (autonomous block, after #13 merged)
 

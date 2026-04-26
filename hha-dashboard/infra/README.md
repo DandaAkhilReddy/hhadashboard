@@ -24,16 +24,55 @@ infra/
 | `enable_keyvault` | `false` | `true` |
 | Postgres reachable from | Public + workstation firewall rule | VNet only (private NIC in delegated subnet) |
 | Key Vault reachable from | (not deployed) | VNet only via private endpoint |
-| App Service → Postgres | Public over the firewall allowlist | **GAP — Session 10 closes via App Service VNet integration** |
+| App Service → Postgres | Public over the firewall allowlist | Regional VNet integration (App Service in `app` subnet, Postgres in `postgres` subnet) |
+| App Service → Key Vault | Literal connection strings in app_settings | `@Microsoft.KeyVault(...)` references resolved by managed identity |
 | Approx monthly cost overhead | $0 | ~$30 (VNet + 2 PEs + 2 DNS zones in eastus2) |
 
-**Known temporary gap (Session 10 closes it):** when `enable_vnet=true`,
-Postgres has `publicNetworkAccess: Disabled`. App Service is **not** yet
-wired into the VNet (regional VNet integration on `Microsoft.Web/sites/networkConfig`
-lands with the OIDC PR), so its outbound calls to Postgres will fail until
-that wiring exists. **Don't deploy with `enable_vnet=true` to a
-running environment** until Session 10 ships, or App Service won't be able
-to reach the database. Dev (where `enable_vnet=false`) keeps working.
+## Deploy procedure
+
+The deploy is two phases: provision (Bicep) then seed-secrets (bootstrap.sh).
+
+### Phase 1 — Provision
+
+```bash
+# from repo root, with az logged in to the right subscription
+ENV=prod
+RG=rg-hha-dashboard-${ENV}
+
+az group create -n $RG -l eastus2
+
+az deployment group create \
+  -g $RG \
+  -f infra/main.bicep \
+  -p infra/env/${ENV}.bicepparam \
+  -p postgres_admin_password='__placeholder__' \
+  -p deployer_workstation_ip=$(curl -s ifconfig.me) \
+  -p azure_tenant_id_for_kv=$(az account show --query tenantId -o tsv)
+```
+
+The placeholder `postgres_admin_password` is fine — Phase 2 overwrites it.
+The deployment lands the VNet, KV (empty), Postgres, App Services with
+VNet integration, plus the two RBAC role assignments. App settings
+contain `@Microsoft.KeyVault(...)` references that won't resolve yet.
+
+### Phase 2 — Seed secrets
+
+```bash
+ENV=prod bash infra/bootstrap.sh
+```
+
+This script generates a 24-byte postgres password, writes the three
+secrets KV references expect (`postgres-admin-password`, `database-url`,
+`database-url-sync`), and restarts the App Services so they pick up
+the resolved values. Idempotent — re-running with an already-seeded
+vault is a no-op.
+
+After Phase 2:
+
+```bash
+curl -s https://app-hha-api-${ENV}.azurewebsites.net/health   # → {"status":"ok"}
+curl -s https://app-hha-api-${ENV}.azurewebsites.net/ready    # → 200 with DB connected
+```
 
 ## What's IN this scaffold (Sessions 8 + 9)
 
