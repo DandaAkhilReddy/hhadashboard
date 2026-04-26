@@ -60,6 +60,16 @@ param enable_email = false
 // `python -m jobs.upload_ingest.main` etc.
 param enable_container_jobs = false
 
+// ACR — off in dev. Cron images aren't deployed in dev (jobs run from
+// the laptop). Flip to true if you want to test image-push end-to-end.
+param enable_acr = false
+param acr_sku = 'Basic'
+
+// RBAC — off in dev. Nothing in dev needs MI auth (dev uses connection
+// strings + dev fallback header). Skipping role propagation makes redeploys
+// faster.
+param enable_rbac = false
+
 // Entra IDs — empty in dev so the API falls back to the Authorization: Dev <role>
 // stub flow. When the Entra app registrations land per docs/ENTRA_SETUP.md,
 // fill these in or override at deploy time.
