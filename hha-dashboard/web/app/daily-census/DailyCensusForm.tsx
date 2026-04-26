@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { toast } from "@/components/Toast";
-import { api, type DailyEntryOut } from "@/lib/api-client";
+import { useApiBrowser, type DailyEntryOut } from "@/lib/api-browser";
 import { cn } from "@/lib/format";
 
 type Draft = {
@@ -37,6 +37,7 @@ function today(): string {
 
 export function DailyCensusForm({ initialRows }: { initialRows: DailyEntryOut[] }) {
   const router = useRouter();
+  const api = useApiBrowser();
   const [drafts, setDrafts] = useState<Draft[]>(initialRows.map(toDraft));
   const [saving, setSaving] = useState(false);
 

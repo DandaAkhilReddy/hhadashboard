@@ -41,6 +41,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.tsbuildinfo
 
 # Generated types (regenerated from OpenAPI)
 # NOTE: lib/api-types.ts IS committed — it's the contract between api and web

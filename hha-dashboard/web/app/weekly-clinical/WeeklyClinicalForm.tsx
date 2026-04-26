@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { toast } from "@/components/Toast";
 import {
-  api,
+  useApiBrowser,
   type ClinicalState,
   type WeeklyClinicalRowIn,
   type WeeklyClinicalRowOut,
-} from "@/lib/api-client";
+} from "@/lib/api-browser";
 import { cn } from "@/lib/format";
 
 type StateRow = {
@@ -199,6 +199,7 @@ export function WeeklyClinicalForm({
   initialRows: WeeklyClinicalRowOut[];
 }) {
   const router = useRouter();
+  const api = useApiBrowser();
   const [weekEnding, setWeekEnding] = useState(initialWeekEnding);
 
   const initialFL = initialRows.find((r) => r.state === "FL");

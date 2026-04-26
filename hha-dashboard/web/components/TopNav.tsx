@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useUser } from "@/lib/auth/use-user";
 import { cn } from "@/lib/format";
 
 const TABS = [
@@ -18,8 +19,36 @@ const TABS = [
   { href: "/uploads", label: "Upload Files", badge: "owners" },
 ];
 
+function userDisplay(name: string): { label: string; initials: string } {
+  const trimmed = name.trim();
+  if (!trimmed) return { label: "—", initials: "?" };
+  const parts = trimmed.split(/[\s@.]+/).filter(Boolean);
+  const initials = parts
+    .slice(0, 2)
+    .map((p) => p.charAt(0).toUpperCase())
+    .join("");
+  return { label: trimmed, initials: initials || "?" };
+}
+
 export function TopNav() {
   const pathname = usePathname();
+  const { user } = useUser();
+
+  const displayName =
+    user?.authenticated === true
+      ? user.name || user.upn
+      : user?.mode === "dev"
+        ? "dev-default@local"
+        : "—";
+  const subtext =
+    user?.authenticated === true
+      ? user.roles.length > 0
+        ? user.roles.join(" · ")
+        : "no roles"
+      : user?.mode === "dev"
+        ? "admin · dev"
+        : "signed out";
+  const { initials } = userDisplay(displayName);
 
   return (
     <header className="sticky top-0 z-40 bg-slate-900 text-white shadow-sm">
@@ -61,11 +90,11 @@ export function TopNav() {
 
         <div className="flex items-center gap-3">
           <div className="hidden text-right text-[11px] text-slate-300 sm:block">
-            <div className="font-medium text-slate-200">Akhil Reddy</div>
-            <div className="text-slate-500">admin · dev</div>
+            <div className="font-medium text-slate-200">{displayName}</div>
+            <div className="text-slate-500">{subtext}</div>
           </div>
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-xs font-bold">
-            AR
+            {initials}
           </div>
         </div>
       </div>

@@ -1,11 +1,18 @@
 /**
- * Typed API client for the FastAPI backend.
+ * Server-side API client for the FastAPI backend.
  *
- * Session 1: hand-typed shapes (matches Pydantic response_model).
- * Session 2: replace with auto-generated types via `npm run gen-types`.
+ * Used by server components (`/`, `/operations`, `/finance`, ...). For client
+ * components (entry forms), import from `@/lib/api-browser` instead — that
+ * variant uses MSAL `acquireTokenSilent` to attach a fresh Bearer token.
+ *
+ * Auth header source: read from the encrypted `hha_session` cookie via
+ * `getServerAuthHeader()`. In dev mode (NEXT_PUBLIC_AUTH_MODE=dev) and no
+ * cookie, falls back to `Authorization: Dev admin` so local dev keeps
+ * working without Azure setup.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { getServerAuthHeader } from "./auth/server-session";
+import { apiGet, apiPostFormData, apiPostJson } from "./api-fetch";
 
 // ---------- Types (mirror Pydantic schemas) ----------
 
@@ -334,47 +341,13 @@ export type DailyEntryOut = {
   updated_at: string | null;
 };
 
-// ---------- Fetch wrapper ----------
-
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: "Dev admin" },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    throw new Error(`${path} → ${res.status}: ${await res.text()}`);
-  }
-  return (await res.json()) as T;
-}
-
 // ---------- Typed endpoints ----------
 
-async function postFormData<T>(path: string, formData: FormData): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { Authorization: "Dev admin" },
-    body: formData,
-  });
-  if (!res.ok) {
-    throw new Error(`${path} → ${res.status}: ${await res.text()}`);
-  }
-  return (await res.json()) as T;
-}
-
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: "Dev admin",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    throw new Error(`${path} → ${res.status}: ${await res.text()}`);
-  }
-  return (await res.json()) as T;
-}
+const get = <T>(path: string) => apiGet<T>(path, getServerAuthHeader);
+const postJson = <T>(path: string, body: unknown) =>
+  apiPostJson<T>(path, body, getServerAuthHeader);
+const postFormData = <T>(path: string, fd: FormData) =>
+  apiPostFormData<T>(path, fd, getServerAuthHeader);
 
 export const api = {
   sites: () => get<Site[]>("/api/v1/sites"),

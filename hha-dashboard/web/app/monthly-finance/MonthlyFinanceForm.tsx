@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { toast } from "@/components/Toast";
 import {
-  api,
+  useApiBrowser,
   type FinanceState,
   type MonthlyFinanceRowIn,
   type MonthlyFinanceRowOut,
-} from "@/lib/api-client";
+} from "@/lib/api-browser";
 import { cn } from "@/lib/format";
 
 const MONTHS = [
@@ -246,6 +246,7 @@ export function MonthlyFinanceForm({
   initialRows: MonthlyFinanceRowOut[];
 }) {
   const router = useRouter();
+  const api = useApiBrowser();
   const [year, setYear] = useState(initialYear);
   const [month, setMonth] = useState(initialMonth);
 

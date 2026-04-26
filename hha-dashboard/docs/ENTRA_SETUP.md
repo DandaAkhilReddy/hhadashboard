@@ -114,16 +114,56 @@ otherwise be 401.
 - `No matching signing key for token` after a force-refresh — Entra rotated
   keys faster than 24h cache TTL; not concerning if rare, dig in if frequent.
 
-## 5 · Frontend wiring (MSAL.js)
+## 5 · Frontend wiring (MSAL.js) — done in Session 6
 
-Owned by the web tier; not in this PR. The SPA needs:
-- `@azure/msal-browser` configured with the **web app**'s client ID
-- Login redirect to `/auth/callback`
-- On every API call: `acquireTokenSilent({ scopes: ["api://<api-client-id>/access_as_user"] })`
-- Attach `Authorization: Bearer ${accessToken.accessToken}` to outgoing requests
+The SPA was wired in `feat/session-6-msal`. Architecture:
 
-The web/lib/api-client.ts currently sends `Authorization: Dev admin` — that
-becomes `Bearer <jwt>` once MSAL is wired (separate session).
+- `@azure/msal-browser` + `@azure/msal-react` (browser-only)
+- Server components (dashboards) fetch via a Node-only api-client that reads
+  an encrypted httpOnly `hha_session` cookie and forwards the token as
+  `Authorization: Bearer <jwt>`
+- Client components (entry forms) use a `useApiBrowser()` hook that calls
+  MSAL's `acquireTokenSilent` directly — they never touch the cookie
+- Sign-in (`/auth/sign-in`) → MSAL redirect → callback (`/auth/callback`)
+  acquires the API token and POSTs to `/api/auth/session` to set the
+  cookie → user lands on the page they wanted
+- Middleware in `web/middleware.ts` redirects unauthenticated requests to
+  `/auth/sign-in` outside dev mode. Doesn't decrypt — presence-only check
+- Sign-out (`/auth/sign-out`) clears the cookie AND calls
+  MSAL's `logoutRedirect` (both required, otherwise half-signed-out)
+
+### Switching from dev mode to real auth
+
+The dev fallback is gated on `NEXT_PUBLIC_AUTH_MODE`. To go live:
+
+1. Complete steps 1–3 above (Entra app registrations, security groups,
+   API env vars).
+2. Set frontend env vars in `web/.env.local` or hosting config:
+
+   ```bash
+   NEXT_PUBLIC_AUTH_MODE=prod
+   NEXT_PUBLIC_AZURE_TENANT_ID=<tenant-uuid>
+   NEXT_PUBLIC_AZURE_WEB_CLIENT_ID=<from-1b>
+   NEXT_PUBLIC_AZURE_API_CLIENT_ID=<from-1a>
+   NEXT_PUBLIC_ENTRA_GROUP_ADMIN=<guid>
+   # … one for each role group …
+   SESSION_SECRET=<openssl rand -base64 32>
+   ```
+
+3. Restart the Next dev server. Hitting `/` redirects to `/auth/sign-in`,
+   which MSAL handles via redirect to login.microsoftonline.com.
+
+In dev (`NEXT_PUBLIC_AUTH_MODE=dev`), MSAL is bypassed entirely — the
+api-client sends `Authorization: Dev admin` and the dashboard works
+without any Azure setup.
+
+### What's still deferred
+
+- Silent background token refresh (1h tokens; user re-logs in for now)
+- Conditional Access step-up flows
+- Role-based tab filtering in TopNav (backend already enforces; UI shows
+  static badges)
+- Playwright E2E for the sign-in flow (needs a real Azure tenant)
 
 ## 6 · Edge cases / gotchas
 
