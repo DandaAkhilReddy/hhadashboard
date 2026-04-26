@@ -16,7 +16,6 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     ARRAY,
-    BigInteger,
     CheckConstraint,
     Date,
     DateTime,
@@ -28,7 +27,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .base import Base, BIGINT_PK, DataClass
+from .base import BIGINT_PK, Base, DataClass
 
 A = DataClass.A.value
 B = DataClass.B.value

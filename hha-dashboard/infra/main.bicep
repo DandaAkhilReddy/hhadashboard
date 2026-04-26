@@ -272,6 +272,15 @@ module containerjobs './modules/containerjobs.bicep' = if (enable_container_jobs
     log_analytics_customer_id: enable_monitor ? monitor!.outputs.workspace_customer_id : ''
     log_analytics_shared_key: log_analytics_shared_key
     pg_backup_image: pg_backup_image
+    // alert_digest + cred_scan: gated on email being configured. When
+    // enable_email is false the cron jobs would no-op anyway, so we save
+    // the resource cost by not provisioning them.
+    enable_alert_jobs: enable_email
+    azure_communication_endpoint: enable_email ? acsEmail!.outputs.acs_endpoint : ''
+    azure_communication_sender: enable_email ? acsEmail!.outputs.sender_address : ''
+    database_url: enable_keyvault
+      ? '@Microsoft.KeyVault(VaultName=${kv_name};SecretName=database-url)'
+      : database_url_literal
     tags: tags
   }
 }

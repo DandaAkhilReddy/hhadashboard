@@ -41,6 +41,31 @@ param pg_backup_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 @description('Cron expression for pg_backup. Default: 03:00 UTC daily.')
 param pg_backup_schedule string = '0 3 * * *'
 
+@description('Container image for alert_digest job. Default is the placeholder; replace with the registry-pushed image once ACR is wired (e.g. acrhhaprod.azurecr.io/alert-digest:1.0).')
+param alert_digest_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
+@description('Cron expression for alert_digest. Default: 11:00 UTC weekdays (≈07:00 ET).')
+param alert_digest_schedule string = '0 11 * * 1-5'
+
+@description('Container image for cred_scan job.')
+param cred_scan_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
+@description('Cron expression for cred_scan. Default: 12:00 UTC daily.')
+param cred_scan_schedule string = '0 12 * * *'
+
+@description('Master switch — turn on alert_digest + cred_scan jobs. Both gate independently on this AND enable_email being passed through (jobs no-op without ACS env).')
+param enable_alert_jobs bool = false
+
+@description('ACS endpoint URL. Required by alert_digest + cred_scan to send. Empty string disables those jobs at the env-var level (the cron will exit cleanly with "Email not configured").')
+param azure_communication_endpoint string = ''
+
+@description('ACS sender address (DoNotReply@<azurecomm>).')
+param azure_communication_sender string = ''
+
+@description('Async DATABASE_URL passed to alert_digest + cred_scan. KV reference in prod (full @Microsoft.KeyVault(...) string), literal in dev.')
+@secure()
+param database_url string = ''
+
 @description('Tags applied to every resource.')
 param tags object = {}
 
@@ -112,6 +137,102 @@ resource pgBackupJob 'Microsoft.App/jobs@2024-03-01' = {
   }
 }
 
+// alert_digest — daily exec digest of variance flags. Sends via ACS.
+resource alertDigestJob 'Microsoft.App/jobs@2024-03-01' = if (enable_alert_jobs) {
+  name: 'job-alert-digest-${env_name_prefix}'
+  location: location
+  tags: tags
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    environmentId: env.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Schedule'
+      replicaTimeout: 600 // 10 min ceiling — should finish in under 60s
+      replicaRetryLimit: 1
+      scheduleTriggerConfig: {
+        cronExpression: alert_digest_schedule
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      secrets: [
+        {
+          name: 'database-url'
+          value: database_url
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'alert-digest'
+          image: alert_digest_image
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            { name: 'ENV_NAME', value: env_name_prefix }
+            { name: 'AZURE_COMMUNICATION_ENDPOINT', value: azure_communication_endpoint }
+            { name: 'AZURE_COMMUNICATION_SENDER', value: azure_communication_sender }
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
+// cred_scan — daily credential expiry alerts. Same ACS env shape.
+resource credScanJob 'Microsoft.App/jobs@2024-03-01' = if (enable_alert_jobs) {
+  name: 'job-cred-scan-${env_name_prefix}'
+  location: location
+  tags: tags
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    environmentId: env.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Schedule'
+      replicaTimeout: 600
+      replicaRetryLimit: 1
+      scheduleTriggerConfig: {
+        cronExpression: cred_scan_schedule
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      secrets: [
+        {
+          name: 'database-url'
+          value: database_url
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'cred-scan'
+          image: cred_scan_image
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            { name: 'ENV_NAME', value: env_name_prefix }
+            { name: 'AZURE_COMMUNICATION_ENDPOINT', value: azure_communication_endpoint }
+            { name: 'AZURE_COMMUNICATION_SENDER', value: azure_communication_sender }
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
 @description('Container Apps environment resource ID — used by main.bicep to wire additional Job resources later.')
 output env_id string = env.id
 
@@ -123,3 +244,9 @@ output pg_backup_job_id string = pgBackupJob.id
 
 @description('pg_backup job principal ID (managed identity). Wire to Storage RBAC in main.bicep follow-up.')
 output pg_backup_principal_id string = pgBackupJob.identity.principalId
+
+@description('alert_digest job principal ID — wire to ACS Contributor (or "Email Communication Service Contributor") for managed-identity sends.')
+output alert_digest_principal_id string = enable_alert_jobs ? alertDigestJob!.identity.principalId : ''
+
+@description('cred_scan job principal ID — same role assignment as alert_digest.')
+output cred_scan_principal_id string = enable_alert_jobs ? credScanJob!.identity.principalId : ''
