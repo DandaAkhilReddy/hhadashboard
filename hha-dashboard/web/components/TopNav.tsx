@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useUser } from "@/lib/auth/use-user";
 import { cn } from "@/lib/format";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const TABS = [
   { href: "/", label: "Overview" },

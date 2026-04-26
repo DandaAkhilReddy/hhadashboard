@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
 import { cn } from "@/lib/format";
+import type { ReactNode } from "react";
 
 export function Card({
   children,
@@ -9,12 +9,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "rounded-xl border border-slate-200 bg-white p-5 shadow-sm",
-        className,
-      )}
-    >
+    <div className={cn("rounded-xl border border-slate-200 bg-white p-5 shadow-sm", className)}>
       {children}
     </div>
   );

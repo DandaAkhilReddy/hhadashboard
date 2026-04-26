@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { toast } from "@/components/Toast";
-import { useApiBrowser, type DailyEntryOut } from "@/lib/api-browser";
+import { type DailyEntryOut, useApiBrowser } from "@/lib/api-browser";
 import { cn } from "@/lib/format";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 
 type Draft = {
   site_id: number;
@@ -44,15 +44,10 @@ export function DailyCensusForm({ initialRows }: { initialRows: DailyEntryOut[] 
   // If the server returned nothing (API down, etc.), render a hint instead of an empty table.
   const hasAnyRows = drafts.length > 0;
 
-  const enteredCount = useMemo(
-    () => drafts.filter((d) => d.census.trim() !== "").length,
-    [drafts],
-  );
+  const enteredCount = useMemo(() => drafts.filter((d) => d.census.trim() !== "").length, [drafts]);
 
   const updateDraft = (site_id: number, patch: Partial<Draft>): void => {
-    setDrafts((prev) =>
-      prev.map((d) => (d.site_id === site_id ? { ...d, ...patch } : d)),
-    );
+    setDrafts((prev) => prev.map((d) => (d.site_id === site_id ? { ...d, ...patch } : d)));
   };
 
   const onSave = async (): Promise<void> => {
@@ -161,9 +156,7 @@ export function DailyCensusForm({ initialRows }: { initialRows: DailyEntryOut[] 
                         onChange={(e) => updateDraft(d.site_id, { census: e.target.value })}
                         className={cn(
                           "w-28 rounded-md border px-2 py-1 text-sm tabular-nums",
-                          filled
-                            ? "border-emerald-300 bg-emerald-50"
-                            : "border-slate-300 bg-white",
+                          filled ? "border-emerald-300 bg-emerald-50" : "border-slate-300 bg-white",
                         )}
                         placeholder="—"
                         disabled={saving}
@@ -176,9 +169,7 @@ export function DailyCensusForm({ initialRows }: { initialRows: DailyEntryOut[] 
                         max={50}
                         inputMode="numeric"
                         value={d.open_shifts}
-                        onChange={(e) =>
-                          updateDraft(d.site_id, { open_shifts: e.target.value })
-                        }
+                        onChange={(e) => updateDraft(d.site_id, { open_shifts: e.target.value })}
                         className="w-20 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm tabular-nums"
                         disabled={saving}
                       />

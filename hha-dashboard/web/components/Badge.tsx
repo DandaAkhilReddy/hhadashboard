@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
 import { cn } from "@/lib/format";
+import type { ReactNode } from "react";
 
 type Variant = "good" | "warn" | "bad" | "blue" | "gray";
 
@@ -36,10 +36,6 @@ export function SourceTag({ source }: { source: string }) {
           ? "TX · manual"
           : source;
   const variant: Variant =
-    source === "VENTRA_FL_ATHENA"
-      ? "good"
-      : source === "VENTRA_FL_FALLBACK"
-        ? "warn"
-        : "gray";
+    source === "VENTRA_FL_ATHENA" ? "good" : source === "VENTRA_FL_FALLBACK" ? "warn" : "gray";
   return <Badge variant={variant}>{label}</Badge>;
 }

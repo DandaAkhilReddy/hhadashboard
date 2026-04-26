@@ -8,10 +8,10 @@
  * account and we end up back-to-back signed in.
  */
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useMsal } from "@azure/msal-react";
 import { isMsalConfigured } from "@/lib/auth/msal-config";
+import { useMsal } from "@azure/msal-react";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 async function clearSession(): Promise<void> {
   await fetch("/api/auth/session", { method: "DELETE" });

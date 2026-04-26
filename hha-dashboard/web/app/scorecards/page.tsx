@@ -1,7 +1,7 @@
 import { Badge } from "@/components/Badge";
 import { Card } from "@/components/Card";
 import { PageHeader } from "@/components/PageHeader";
-import { api, type MgmaBand, type Scorecard } from "@/lib/api-client";
+import { type MgmaBand, type Scorecard, api } from "@/lib/api-client";
 import { num, usd } from "@/lib/format";
 
 export default async function ScorecardsPage() {
@@ -14,8 +14,8 @@ export default async function ScorecardsPage() {
         title="Doctor Scorecards"
         subtitle={
           <>
-            Per-physician performance · <strong>Exec + comp_viewer only</strong> · Doctors never
-            see own rank or peers&apos;
+            Per-physician performance · <strong>Exec + comp_viewer only</strong> · Doctors never see
+            own rank or peers&apos;
           </>
         }
         right={

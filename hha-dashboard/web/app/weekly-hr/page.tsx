@@ -26,9 +26,8 @@ export default async function WeeklyHrPage({
             Andrea — owner_hr.
             <br />
             <span className="text-xs text-slate-500">
-              Headcount, open positions, 90-day terminations, below-FMV count. HHA-wide
-              (not split by state). Re-saving overwrites in place. People board updates
-              immediately.
+              Headcount, open positions, 90-day terminations, below-FMV count. HHA-wide (not split
+              by state). Re-saving overwrites in place. People board updates immediately.
             </span>
           </>
         }

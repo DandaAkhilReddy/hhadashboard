@@ -28,9 +28,8 @@ export default async function WeeklyClinicalPage({
             Dr. Aneja / Dr. Reddy &mdash; owner_clinical.
             <br />
             <span className="text-xs text-slate-500">
-              Enter H&amp;P 24h compliance, DC 48h compliance, average LOS, and chart-audit
-              volume for FL and TX. Re-saving overwrites in place. Clinical board reflects
-              immediately.
+              Enter H&amp;P 24h compliance, DC 48h compliance, average LOS, and chart-audit volume
+              for FL and TX. Re-saving overwrites in place. Clinical board reflects immediately.
             </span>
           </>
         }

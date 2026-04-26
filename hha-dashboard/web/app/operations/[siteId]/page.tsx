@@ -1,5 +1,3 @@
-import Link from "next/link";
-import { notFound } from "next/navigation";
 import { Badge } from "@/components/Badge";
 import { Card, CardHeader } from "@/components/Card";
 import { CensusTrendChart, buildTrendPoints } from "@/components/CensusTrendChart";
@@ -7,6 +5,8 @@ import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { api } from "@/lib/api-client";
 import { dateShort, num, pct, signed, usd } from "@/lib/format";
+import Link from "next/link";
+import { notFound } from "next/navigation";
 import { SiteCensusForm } from "./SiteCensusForm";
 
 export default async function SiteDetailPage({
@@ -20,17 +20,15 @@ export default async function SiteDetailPage({
     notFound();
   }
 
-  let site;
+  let site: Awaited<ReturnType<typeof api.siteDetail>>;
   try {
     site = await api.siteDetail(siteId);
   } catch {
     notFound();
   }
 
-  const varianceTone =
-    site.variance_pct < -15 ? "bad" : site.variance_pct < 0 ? "warn" : "good";
-  const shiftsTone =
-    site.open_shifts === 0 ? "good" : site.open_shifts >= 3 ? "bad" : "warn";
+  const varianceTone = site.variance_pct < -15 ? "bad" : site.variance_pct < 0 ? "warn" : "good";
+  const shiftsTone = site.open_shifts === 0 ? "good" : site.open_shifts >= 3 ? "bad" : "warn";
 
   const trendPoints = buildTrendPoints(
     site.recent_entries.map((e) => ({ entry_date: e.entry_date, census: e.census })),
@@ -109,7 +107,10 @@ export default async function SiteDetailPage({
         </Card>
 
         <Card>
-          <CardHeader title="14-day census trend" owner={`Today highlighted · 3-mo avg ${site.census_3mo_avg}`} />
+          <CardHeader
+            title="14-day census trend"
+            owner={`Today highlighted · 3-mo avg ${site.census_3mo_avg}`}
+          />
           <CensusTrendChart points={trendPoints} avg={site.census_3mo_avg} />
         </Card>
       </div>
@@ -154,7 +155,10 @@ export default async function SiteDetailPage({
               </thead>
               <tbody>
                 {site.recent_entries.map((e) => (
-                  <tr key={e.entry_date} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                  <tr
+                    key={e.entry_date}
+                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                  >
                     <td className="py-2.5 font-medium tabular-nums text-slate-900">
                       {dateShort(e.entry_date)}
                     </td>
@@ -174,7 +178,10 @@ export default async function SiteDetailPage({
                     <td className="py-2.5 text-xs text-slate-500 max-w-[180px] truncate">
                       {e.entered_by_upn}
                     </td>
-                    <td className="py-2.5 text-xs text-slate-500 max-w-[260px] truncate" title={e.notes ?? ""}>
+                    <td
+                      className="py-2.5 text-xs text-slate-500 max-w-[260px] truncate"
+                      title={e.notes ?? ""}
+                    >
                       {e.notes ?? "—"}
                     </td>
                   </tr>

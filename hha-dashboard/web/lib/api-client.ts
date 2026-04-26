@@ -11,8 +11,8 @@
  * working without Azure setup.
  */
 
-import { getServerAuthHeader } from "./auth/server-session";
 import { apiGet, apiPostFormData, apiPostJson } from "./api-fetch";
+import { getServerAuthHeader } from "./auth/server-session";
 
 // ---------- Types (mirror Pydantic schemas) ----------
 
@@ -365,8 +365,7 @@ export const api = {
   credentialsExpiring: () => get<CredentialExpiring[]>("/api/v1/clinical/credentials-expiring"),
 
   peopleSummary: () => get<PeopleSummary>("/api/v1/people/summary"),
-  openPositionsBySite: () =>
-    get<OpenPositionBySite[]>("/api/v1/people/open-positions-by-site"),
+  openPositionsBySite: () => get<OpenPositionBySite[]>("/api/v1/people/open-positions-by-site"),
 
   scorecards: () => get<Scorecard[]>("/api/v1/scorecards"),
 

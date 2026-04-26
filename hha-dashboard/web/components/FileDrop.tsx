@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
 import { cn } from "@/lib/format";
+import { useCallback, useRef, useState } from "react";
 
 type FileDropProps = {
   onFiles: (files: File[]) => void;
@@ -49,9 +49,8 @@ export function FileDrop({
 
   return (
     <div>
-      <div
-        role="button"
-        tabIndex={0}
+      <button
+        type="button"
         aria-disabled={disabled}
         onDragOver={(e) => {
           e.preventDefault();
@@ -90,7 +89,7 @@ export function FileDrop({
         <div className="text-xs text-slate-500">
           PDFs, Excel (.xlsx / .xls), CSV · Max {(maxBytes / 1024 / 1024).toFixed(0)} MB per file
         </div>
-      </div>
+      </button>
       <input
         ref={inputRef}
         type="file"

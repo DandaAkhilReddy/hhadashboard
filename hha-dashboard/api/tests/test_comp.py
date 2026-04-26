@@ -15,7 +15,6 @@ from app.services.comp import (
     mgma_benchmark_50th_usd,
 )
 
-
 # ---- Band classification ----
 
 

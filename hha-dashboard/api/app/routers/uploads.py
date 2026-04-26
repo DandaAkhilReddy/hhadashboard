@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -48,7 +48,7 @@ def _allowed_extension(filename: str) -> str | None:
 def _make_blob_name(upn: str, file_type: str, original_filename: str, sha256_hex: str) -> str:
     """Format: uploads/{type}/{YYYY-MM-DD}/{upn-sanitized}_{uuid8}_{sha8}.{ext}"""
     ext = _allowed_extension(original_filename) or "bin"
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     upn_safe = upn.replace("@", "_at_").replace(".", "_")
     short_uuid = uuid.uuid4().hex[:8]
     short_sha = sha256_hex[:8]

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { toast } from "@/components/Toast";
-import { useApiBrowser, type WeeklyHrOut } from "@/lib/api-browser";
+import { type WeeklyHrOut, useApiBrowser } from "@/lib/api-browser";
 import { cn } from "@/lib/format";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 type Draft = {
   headcount_w2: string;
@@ -110,7 +110,7 @@ export function WeeklyHrForm({
       toast("Enter at least one headcount value.", "error");
       return;
     }
-    const d = new Date(weekEnding + "T00:00:00");
+    const d = new Date(`${weekEnding}T00:00:00`);
     if (d.getDay() !== 0) {
       toast("Week ending must be a Sunday.", "error");
       return;
@@ -140,7 +140,7 @@ export function WeeklyHrForm({
   return (
     <Card>
       <CardHeader
-        title={`Week ending ${new Date(weekEnding + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}`}
+        title={`Week ending ${new Date(`${weekEnding}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}`}
         owner="Andrea · owner_hr"
         right={
           <div className="flex items-center gap-2">
@@ -173,24 +173,49 @@ export function WeeklyHrForm({
             Headcount
           </div>
           <div className="grid gap-3 md:grid-cols-2">
-            <NumField label="W-2 employees" value={draft.headcount_w2}
-              onChange={(v) => update({ headcount_w2: v })} disabled={saving} max={10000} />
-            <NumField label="1099 contractors" value={draft.headcount_1099}
-              onChange={(v) => update({ headcount_1099: v })} disabled={saving} max={10000} />
+            <NumField
+              label="W-2 employees"
+              value={draft.headcount_w2}
+              onChange={(v) => update({ headcount_w2: v })}
+              disabled={saving}
+              max={10000}
+            />
+            <NumField
+              label="1099 contractors"
+              value={draft.headcount_1099}
+              onChange={(v) => update({ headcount_1099: v })}
+              disabled={saving}
+              max={10000}
+            />
           </div>
 
           <div className="mt-5 mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">
             Pipeline & Risk
           </div>
           <div className="grid gap-3 md:grid-cols-3">
-            <NumField label="Open positions" value={draft.open_positions_total}
-              onChange={(v) => update({ open_positions_total: v })} disabled={saving} max={1000} />
-            <NumField label="90-day terminations" value={draft.terminations_90d_count}
-              onChange={(v) => update({ terminations_90d_count: v })} disabled={saving} max={1000}
-              hint="rolling 90-day window" />
-            <NumField label="Below FMV" value={draft.below_fmv_count}
-              onChange={(v) => update({ below_fmv_count: v })} disabled={saving} max={10000}
-              hint="comp vs market median" />
+            <NumField
+              label="Open positions"
+              value={draft.open_positions_total}
+              onChange={(v) => update({ open_positions_total: v })}
+              disabled={saving}
+              max={1000}
+            />
+            <NumField
+              label="90-day terminations"
+              value={draft.terminations_90d_count}
+              onChange={(v) => update({ terminations_90d_count: v })}
+              disabled={saving}
+              max={1000}
+              hint="rolling 90-day window"
+            />
+            <NumField
+              label="Below FMV"
+              value={draft.below_fmv_count}
+              onChange={(v) => update({ below_fmv_count: v })}
+              disabled={saving}
+              max={10000}
+              hint="comp vs market median"
+            />
           </div>
 
           <label className="mt-5 block">
@@ -218,13 +243,20 @@ export function WeeklyHrForm({
             <dt className="text-slate-500">Total headcount</dt>
             <dd className="font-bold text-slate-900 tabular-nums">{total}</dd>
             <dt className="text-slate-500">Turnover (90d)</dt>
-            <dd className={cn(
-              "font-bold tabular-nums",
-              total > 0 && terms / total > 0.10 ? "text-red-600" : "text-slate-900",
-            )}>{turnoverPct}{total > 0 ? "%" : ""}</dd>
+            <dd
+              className={cn(
+                "font-bold tabular-nums",
+                total > 0 && terms / total > 0.1 ? "text-red-600" : "text-slate-900",
+              )}
+            >
+              {turnoverPct}
+              {total > 0 ? "%" : ""}
+            </dd>
             <dt className="text-slate-500">W-2 / 1099 mix</dt>
             <dd className="text-slate-700 tabular-nums">
-              {total > 0 ? `${Math.round((w2 / total) * 100)}% / ${Math.round((c1099 / total) * 100)}%` : "—"}
+              {total > 0
+                ? `${Math.round((w2 / total) * 100)}% / ${Math.round((c1099 / total) * 100)}%`
+                : "—"}
             </dd>
           </dl>
           {draft.updated_at ? (

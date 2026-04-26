@@ -1,16 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { toast } from "@/components/Toast";
 import {
-  useApiBrowser,
   type ClinicalState,
   type WeeklyClinicalRowIn,
   type WeeklyClinicalRowOut,
+  useApiBrowser,
 } from "@/lib/api-browser";
 import { cn } from "@/lib/format";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 type StateRow = {
   state: ClinicalState;
@@ -108,17 +108,23 @@ function StateSection({
   saving: boolean;
 }) {
   const tone =
-    row.state === "FL"
-      ? "border-indigo-200 bg-indigo-50/30"
-      : "border-amber-200 bg-amber-50/30";
+    row.state === "FL" ? "border-indigo-200 bg-indigo-50/30" : "border-amber-200 bg-amber-50/30";
 
   // Quick visual cue: are H&P / DC at-or-above target?
   const hp = Number.parseFloat(row.hp_24h_pct);
   const dc = Number.parseFloat(row.dc_48h_pct);
   const hpTone =
-    Number.isFinite(hp) && hp >= 95 ? "✓ at target" : Number.isFinite(hp) ? "⚠ below 95% target" : undefined;
+    Number.isFinite(hp) && hp >= 95
+      ? "✓ at target"
+      : Number.isFinite(hp)
+        ? "⚠ below 95% target"
+        : undefined;
   const dcTone =
-    Number.isFinite(dc) && dc >= 90 ? "✓ at target" : Number.isFinite(dc) ? "⚠ below 90% target" : undefined;
+    Number.isFinite(dc) && dc >= 90
+      ? "✓ at target"
+      : Number.isFinite(dc)
+        ? "⚠ below 90% target"
+        : undefined;
 
   return (
     <div className={cn("rounded-xl border p-5", tone)}>
@@ -126,7 +132,9 @@ function StateSection({
         <div>
           <h3 className="text-lg font-bold text-slate-900">{row.state}</h3>
           <div className="text-xs text-slate-500">
-            {row.state === "FL" ? "7 sites — Westside, Woodmont, JFK Main + North, Palms West, University, Jackson" : "4 sites — Bay, Doctors, Huntsville, Corpus"}
+            {row.state === "FL"
+              ? "7 sites — Westside, Woodmont, JFK Main + North, Palms West, University, Jackson"
+              : "4 sites — Bay, Doctors, Huntsville, Corpus"}
           </div>
         </div>
         {row.updated_at ? (
@@ -221,7 +229,7 @@ export function WeeklyClinicalForm({
       return;
     }
     // Date sanity check before round-trip
-    const d = new Date(weekEnding + "T00:00:00");
+    const d = new Date(`${weekEnding}T00:00:00`);
     if (d.getDay() !== 0) {
       toast("Week ending must be a Sunday.", "error");
       return;
@@ -249,7 +257,7 @@ export function WeeklyClinicalForm({
   return (
     <Card>
       <CardHeader
-        title={`Week ending ${new Date(weekEnding + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}`}
+        title={`Week ending ${new Date(`${weekEnding}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}`}
         owner="Dr. Aneja · Dr. Reddy · owner_clinical"
         right={
           <div className="flex items-center gap-2">
@@ -276,8 +284,16 @@ export function WeeklyClinicalForm({
       />
 
       <div className="grid gap-6 md:grid-cols-2">
-        <StateSection row={fl} onChange={(p) => setFl((prev) => ({ ...prev, ...p }))} saving={saving} />
-        <StateSection row={tx} onChange={(p) => setTx((prev) => ({ ...prev, ...p }))} saving={saving} />
+        <StateSection
+          row={fl}
+          onChange={(p) => setFl((prev) => ({ ...prev, ...p }))}
+          saving={saving}
+        />
+        <StateSection
+          row={tx}
+          onChange={(p) => setTx((prev) => ({ ...prev, ...p }))}
+          saving={saving}
+        />
       </div>
     </Card>
   );

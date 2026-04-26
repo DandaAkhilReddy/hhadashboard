@@ -1,21 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Card, CardHeader } from "@/components/Card";
 import { toast } from "@/components/Toast";
 import {
-  useApiBrowser,
   type FinanceState,
   type MonthlyFinanceRowIn,
   type MonthlyFinanceRowOut,
+  useApiBrowser,
 } from "@/lib/api-browser";
 import { cn } from "@/lib/format";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 type StateRow = {
   state: FinanceState;
@@ -74,8 +71,13 @@ function fromOut(row: MonthlyFinanceRowOut): StateRow {
 
 function arSum(r: StateRow): number {
   const n = (s: string) => Number.parseFloat(s) || 0;
-  return n(r.ar_0_30_usd) + n(r.ar_31_60_usd) + n(r.ar_61_90_usd) +
-         n(r.ar_91_120_usd) + n(r.ar_over_120_usd);
+  return (
+    n(r.ar_0_30_usd) +
+    n(r.ar_31_60_usd) +
+    n(r.ar_61_90_usd) +
+    n(r.ar_91_120_usd) +
+    n(r.ar_over_120_usd)
+  );
 }
 
 function buildPayload(year: number, month: number, rows: StateRow[]): MonthlyFinanceRowIn[] {
@@ -111,7 +113,8 @@ function StateSection({
   const total = Number.parseFloat(row.ar_total_usd) || 0;
   const sumOk = total === 0 || Math.abs(sum - total) < 0.5;
 
-  const tone = row.state === "FL" ? "border-indigo-200 bg-indigo-50/30" : "border-amber-200 bg-amber-50/30";
+  const tone =
+    row.state === "FL" ? "border-indigo-200 bg-indigo-50/30" : "border-amber-200 bg-amber-50/30";
 
   return (
     <div className={cn("rounded-xl border p-5", tone)}>
@@ -131,36 +134,66 @@ function StateSection({
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <NumField label="Collections (USD)" value={row.collections_usd}
-          onChange={(v) => onChange({ collections_usd: v })} disabled={saving} />
-        <NumField label="Ventra fee (USD)" value={row.ventra_fee_usd}
-          onChange={(v) => onChange({ ventra_fee_usd: v })} disabled={saving}
-          hint={row.state === "FL" ? "5% of collections" : "n/a (TX has no Ventra)"} />
+        <NumField
+          label="Collections (USD)"
+          value={row.collections_usd}
+          onChange={(v) => onChange({ collections_usd: v })}
+          disabled={saving}
+        />
+        <NumField
+          label="Ventra fee (USD)"
+          value={row.ventra_fee_usd}
+          onChange={(v) => onChange({ ventra_fee_usd: v })}
+          disabled={saving}
+          hint={row.state === "FL" ? "5% of collections" : "n/a (TX has no Ventra)"}
+        />
       </div>
 
       <div className="mt-5 mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
         AR Aging
       </div>
       <div className="grid gap-3 md:grid-cols-3">
-        <NumField label="0–30 days" value={row.ar_0_30_usd}
-          onChange={(v) => onChange({ ar_0_30_usd: v })} disabled={saving} />
-        <NumField label="31–60 days" value={row.ar_31_60_usd}
-          onChange={(v) => onChange({ ar_31_60_usd: v })} disabled={saving} />
-        <NumField label="61–90 days" value={row.ar_61_90_usd}
-          onChange={(v) => onChange({ ar_61_90_usd: v })} disabled={saving} />
-        <NumField label="91–120 days" value={row.ar_91_120_usd}
-          onChange={(v) => onChange({ ar_91_120_usd: v })} disabled={saving} />
-        <NumField label=">120 days" value={row.ar_over_120_usd}
-          onChange={(v) => onChange({ ar_over_120_usd: v })} disabled={saving} />
-        <NumField label="AR total"
+        <NumField
+          label="0–30 days"
+          value={row.ar_0_30_usd}
+          onChange={(v) => onChange({ ar_0_30_usd: v })}
+          disabled={saving}
+        />
+        <NumField
+          label="31–60 days"
+          value={row.ar_31_60_usd}
+          onChange={(v) => onChange({ ar_31_60_usd: v })}
+          disabled={saving}
+        />
+        <NumField
+          label="61–90 days"
+          value={row.ar_61_90_usd}
+          onChange={(v) => onChange({ ar_61_90_usd: v })}
+          disabled={saving}
+        />
+        <NumField
+          label="91–120 days"
+          value={row.ar_91_120_usd}
+          onChange={(v) => onChange({ ar_91_120_usd: v })}
+          disabled={saving}
+        />
+        <NumField
+          label=">120 days"
+          value={row.ar_over_120_usd}
+          onChange={(v) => onChange({ ar_over_120_usd: v })}
+          disabled={saving}
+        />
+        <NumField
+          label="AR total"
           value={row.ar_total_usd}
           onChange={(v) => onChange({ ar_total_usd: v })}
           disabled={saving}
           hint={
-            total > 0 ? (
-              sumOk ? `✓ matches sum (${sum.toLocaleString()})` :
-              `⚠ buckets sum to ${sum.toLocaleString()}`
-            ) : "enter buckets first"
+            total > 0
+              ? sumOk
+                ? `✓ matches sum (${sum.toLocaleString()})`
+                : `⚠ buckets sum to ${sum.toLocaleString()}`
+              : "enter buckets first"
           }
           hintTone={total > 0 && !sumOk ? "warn" : "neutral"}
         />
@@ -170,11 +203,19 @@ function StateSection({
         KPIs
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        <NumField label="Net Collection Rate (%)" value={row.net_collection_rate_pct}
-          onChange={(v) => onChange({ net_collection_rate_pct: v })} disabled={saving} />
-        <NumField label="Days in A/R" value={row.days_in_ar}
-          onChange={(v) => onChange({ days_in_ar: v })} disabled={saving}
-          hint="target: 45 days" />
+        <NumField
+          label="Net Collection Rate (%)"
+          value={row.net_collection_rate_pct}
+          onChange={(v) => onChange({ net_collection_rate_pct: v })}
+          disabled={saving}
+        />
+        <NumField
+          label="Days in A/R"
+          value={row.days_in_ar}
+          onChange={(v) => onChange({ days_in_ar: v })}
+          disabled={saving}
+          hint="target: 45 days"
+        />
       </div>
 
       <label className="mt-4 block">
@@ -227,10 +268,14 @@ function NumField({
         placeholder="0"
       />
       {hint ? (
-        <div className={cn(
-          "mt-1 text-[10px]",
-          hintTone === "warn" ? "text-amber-700" : "text-slate-500",
-        )}>{hint}</div>
+        <div
+          className={cn(
+            "mt-1 text-[10px]",
+            hintTone === "warn" ? "text-amber-700" : "text-slate-500",
+          )}
+        >
+          {hint}
+        </div>
       ) : null}
     </label>
   );
@@ -307,7 +352,9 @@ export function MonthlyFinanceForm({
               className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
             >
               {MONTHS.map((m, i) => (
-                <option key={m} value={i + 1}>{m}</option>
+                <option key={m} value={i + 1}>
+                  {m}
+                </option>
               ))}
             </select>
             <select
@@ -317,7 +364,9 @@ export function MonthlyFinanceForm({
               className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm"
             >
               {[year - 2, year - 1, year, year + 1].map((y) => (
-                <option key={y} value={y}>{y}</option>
+                <option key={y} value={y}>
+                  {y}
+                </option>
               ))}
             </select>
             <button
@@ -336,8 +385,16 @@ export function MonthlyFinanceForm({
       />
 
       <div className="grid gap-6 md:grid-cols-2">
-        <StateSection row={fl} onChange={(p) => setFl((prev) => ({ ...prev, ...p }))} saving={saving} />
-        <StateSection row={tx} onChange={(p) => setTx((prev) => ({ ...prev, ...p }))} saving={saving} />
+        <StateSection
+          row={fl}
+          onChange={(p) => setFl((prev) => ({ ...prev, ...p }))}
+          saving={saving}
+        />
+        <StateSection
+          row={tx}
+          onChange={(p) => setTx((prev) => ({ ...prev, ...p }))}
+          saving={saving}
+        />
       </div>
     </Card>
   );

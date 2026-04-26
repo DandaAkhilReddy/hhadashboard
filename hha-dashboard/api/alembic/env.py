@@ -1,11 +1,12 @@
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
+
+from alembic import context
+from app.models import masters  # noqa: F401  (registers models on Base.metadata)
 
 # Import Base + all model modules so Alembic sees every table
 from app.models.base import Base
-from app.models import masters  # noqa: F401  (registers models on Base.metadata)
 from app.settings import settings
 
 config = context.config
@@ -21,8 +22,9 @@ target_metadata = Base.metadata
 OWNED_SCHEMAS = {"masters", "entries", "facts", "audit", "alerts", "dims"}
 
 
-def include_name(name, type_, parent_names):
-    """Limit Alembic autogenerate to our schemas."""
+def include_name(name, type_, _parent_names):
+    """Limit Alembic autogenerate to our schemas. _parent_names is required
+    by Alembic's signature but unused here."""
     if type_ == "schema":
         return name in OWNED_SCHEMAS
     return True

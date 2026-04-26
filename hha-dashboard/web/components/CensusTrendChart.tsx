@@ -29,9 +29,7 @@ export function CensusTrendChart({
         style={{ bottom: `${avgPct}%` }}
         aria-hidden
       />
-      <div className="absolute right-0 -top-4 text-[10px] text-slate-400">
-        3-mo avg {avg}
-      </div>
+      <div className="absolute right-0 -top-4 text-[10px] text-slate-400">3-mo avg {avg}</div>
 
       <div className="flex items-end gap-1 h-32 pt-4">
         {points.map((p) => {
@@ -41,15 +39,15 @@ export function CensusTrendChart({
               <div className="flex-1 w-full flex items-end">
                 {p.census !== null ? (
                   <div
-                    className={cn(
-                      "w-full rounded-t",
-                      p.isToday ? "bg-slate-900" : "bg-slate-300",
-                    )}
+                    className={cn("w-full rounded-t", p.isToday ? "bg-slate-900" : "bg-slate-300")}
                     style={{ height: `${heightPct}%` }}
                     title={`${p.date}: ${p.census}`}
                   />
                 ) : (
-                  <div className="w-full h-full border-l border-dashed border-slate-200" title={`${p.date}: no entry`} />
+                  <div
+                    className="w-full h-full border-l border-dashed border-slate-200"
+                    title={`${p.date}: no entry`}
+                  />
                 )}
               </div>
               <div

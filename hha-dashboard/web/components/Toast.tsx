@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/format";
+import { useCallback, useEffect, useState } from "react";
 
 export type ToastVariant = "success" | "error" | "info";
 

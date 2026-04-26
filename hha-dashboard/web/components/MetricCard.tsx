@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
 import { cn } from "@/lib/format";
+import type { ReactNode } from "react";
 
 type MetricCardProps = {
   label: string;
@@ -24,9 +24,7 @@ export function MetricCard({ label, value, sub, tone = "neutral", accent }: Metr
         accent ? "border-indigo-200 bg-indigo-50" : "border-slate-200 bg-white",
       )}
     >
-      <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
-        {label}
-      </div>
+      <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">{label}</div>
       <div className={cn("mt-1 text-3xl font-bold tabular-nums", TONE_CLASS[tone])}>{value}</div>
       {sub ? <div className="mt-1 text-xs text-slate-500">{sub}</div> : null}
     </div>
