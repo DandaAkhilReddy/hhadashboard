@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     azure_storage_account_url: str = "http://localhost:10000/devstoreaccount1"
     azure_storage_connection_string: str = ""  # only set in dev; prod uses MI
     azure_storage_uploads_container: str = "uploads"
+    # The pg_backup cron writes nightly pg_dump output here. Bicep
+    # provisions the container with soft-delete; the operator applies the
+    # immutability lock once the first few backups land (per infra/README.md).
+    azure_storage_backups_container: str = "backups"
 
     # ---------- Azure Document Intelligence ----------
     azure_doc_intelligence_endpoint: str = ""
