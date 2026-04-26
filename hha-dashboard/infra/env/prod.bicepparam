@@ -53,6 +53,14 @@ param enable_vnet = true
 param enable_keyvault = true
 param azure_tenant_id_for_kv = ''
 
+// Storage — ON in prod. Standard_RAGRS for cross-region read-access on
+// backups (the LRS variant works but loses the regional-failover read
+// path). Soft-delete 90 days for HIPAA-friendlier retention. Adds about
+// $10/mo for the account (much less if backups < 100 GB).
+param enable_storage = true
+param storage_sku = 'Standard_RAGRS'
+param storage_soft_delete_retention_days = 90
+
 // Entra IDs — populate from the prod app registrations.
 // Override at deploy time if these aren't yet committed.
 param azure_tenant_id = ''

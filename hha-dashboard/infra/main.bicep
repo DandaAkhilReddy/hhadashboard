@@ -94,6 +94,21 @@ param enable_vnet bool = false
 @description('Enable Key Vault module. Creates an empty vault with private endpoint (when enable_vnet is also true) or public-with-IP-allowlist (when enable_vnet is false). Initial secrets are seeded out-of-band by bootstrap.sh in Session 10.')
 param enable_keyvault bool = false
 
+@description('Enable Storage Account module (uploads + backups containers). Public-access disabled when enable_vnet is also true (PE wiring follows in Session 11+); otherwise public with deployer-IP allowlist.')
+param enable_storage bool = false
+
+@description('Storage Account name. Convention: sthhad{env} (lowercase, alphanumeric only, globally unique). Default composes from env.')
+param storage_account_name string = 'sthha${env_name}${uniqueString(resourceGroup().id)}'
+
+@description('Storage SKU. Standard_LRS for dev, Standard_RAGRS for prod (cross-region read on backups).')
+@allowed(['Standard_LRS', 'Standard_GRS', 'Standard_RAGRS', 'Standard_ZRS'])
+param storage_sku string = 'Standard_LRS'
+
+@description('Storage soft-delete retention days. 7 dev, 90 prod.')
+@minValue(1)
+@maxValue(365)
+param storage_soft_delete_retention_days int = 7
+
 @description('Microsoft Entra tenant id for Key Vault RBAC. Required when enable_keyvault is true.')
 param azure_tenant_id_for_kv string = ''
 
@@ -170,6 +185,24 @@ module keyvault './modules/keyvault.bicep' = if (enable_keyvault) {
   }
 }
 
+// Storage Account — only deployed when enable_storage is true. Holds the
+// `uploads` container (Crystal/Sandy/etc. drop files for the cron ingest
+// to consume; auto-deleted after 7 days via lifecycle policy) and the
+// `backups` container (pg_dump nightlies; immutability lock applied
+// out-of-band by the operator after first backup writes successfully).
+module storage './modules/storage.bicep' = if (enable_storage) {
+  name: 'storage-deploy'
+  params: {
+    name: storage_account_name
+    location: location
+    sku: storage_sku
+    soft_delete_retention_days: storage_soft_delete_retention_days
+    deployer_workstation_ip: deployer_workstation_ip
+    pe_subnet_id: enable_vnet ? vnet!.outputs.pe_subnet_id : ''
+    tags: tags
+  }
+}
+
 // Compose connection strings.
 //
 // App Service resolves `@Microsoft.KeyVault(...)` references only when the
@@ -211,7 +244,9 @@ var api_app_settings = union(common_app_settings, {
   ENTRA_GROUP_OWNER_FINANCE: entra_groups.owner_finance
   ENTRA_GROUP_OWNER_CLINICAL: entra_groups.owner_clinical
   ENTRA_GROUP_OWNER_HR: entra_groups.owner_hr
-  // Defer to Session 9+: ACS connection, Blob URL, Doc Intelligence endpoint
+  AZURE_STORAGE_ACCOUNT_URL: enable_storage ? storage!.outputs.blob_endpoint : ''
+  AZURE_STORAGE_UPLOADS_CONTAINER: enable_storage ? storage!.outputs.uploads_container_name : 'uploads'
+  // Defer to Session 11+: ACS connection, Doc Intelligence endpoint
 })
 
 var web_app_settings = union(common_app_settings, {
@@ -341,3 +376,9 @@ output vnet_id string = enable_vnet ? vnet!.outputs.vnet_id : ''
 
 @description('App subnet ID when enable_vnet is true; empty otherwise. App Service VNet integration in Session 10 attaches here.')
 output app_subnet_id string = enable_vnet ? vnet!.outputs.app_subnet_id : ''
+
+@description('Storage account blob endpoint when enable_storage is true; empty otherwise. Used as AZURE_STORAGE_ACCOUNT_URL in api app_settings.')
+output storage_blob_endpoint string = enable_storage ? storage!.outputs.blob_endpoint : ''
+
+@description('Storage account name when enable_storage is true; empty otherwise. Used by bootstrap/operator commands that target the account directly (e.g. setting the immutability lock on the backups container).')
+output storage_account_name string = enable_storage ? storage!.outputs.storage_name : ''
