@@ -61,6 +61,14 @@ param enable_storage = true
 param storage_sku = 'Standard_RAGRS'
 param storage_soft_delete_retention_days = 90
 
+// Monitor — ON in prod. Required for HIPAA audit chain (Diagnostic Settings
+// route Postgres / App Service / Key Vault / Storage logs into the
+// workspace). 90-day retention; longer-term retention runs in the
+// Postgres audit_log table at the schema level. Workspace ingestion cost
+// scales with traffic — budget ~$50/mo for 5–10 user dashboards.
+param enable_monitor = true
+param monitor_retention_days = 90
+
 // Entra IDs — populate from the prod app registrations.
 // Override at deploy time if these aren't yet committed.
 param azure_tenant_id = ''
