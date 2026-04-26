@@ -50,17 +50,15 @@ param storage_sku = 'Standard_LRS'
 param storage_soft_delete_retention_days = 7
 
 // Monitor — off in dev to save Log Analytics ingestion costs (~$2.30/GB).
-// App Insights connection string in api app_settings is empty; the SDK
-// noops gracefully. Override to true if you want to validate the
-// Diagnostic Settings wiring against a real workspace.
 param enable_monitor = false
 param monitor_retention_days = 30
 
-// Email — off in dev. Mailpit (docker-compose service on port 8025)
-// catches outbound email at compose-up time, no real ACS needed.
-// Override to true if you want to validate the ACS Email path against
-// a real Azure Managed Domain.
+// Email — off in dev. Mailpit catches outbound email at compose-up time.
 param enable_email = false
+
+// Container Apps Jobs — off in dev. Cron jobs run locally via
+// `python -m jobs.upload_ingest.main` etc.
+param enable_container_jobs = false
 
 // Entra IDs — empty in dev so the API falls back to the Authorization: Dev <role>
 // stub flow. When the Entra app registrations land per docs/ENTRA_SETUP.md,
