@@ -1,0 +1,146 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel an in-flight run when new commits hit the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # API — FastAPI + SQLAlchemy + Alembic + pytest. Needs a real Postgres for
+  # the audit-trigger and ready-probe integration tests.
+  # ---------------------------------------------------------------------------
+  api:
+    name: api (python + postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: hha-dashboard/api
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hha
+          POSTGRES_PASSWORD: hha
+          POSTGRES_DB: hha_dashboard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ENV: ci
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://hha:hha@localhost:5432/hha_dashboard
+      DATABASE_URL_SYNC: postgresql+psycopg://hha:hha@localhost:5432/hha_dashboard
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+
+      - name: Test (pytest)
+        run: uv run pytest -v
+
+  # ---------------------------------------------------------------------------
+  # Web — Next.js + biome + tsc + vitest. No DB needed.
+  # ---------------------------------------------------------------------------
+  web:
+    name: web (next + vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: hha-dashboard/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: hha-dashboard/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (biome)
+        run: npm run lint
+
+      - name: Typecheck (tsc)
+        run: npm run typecheck
+
+      - name: Test (vitest)
+        run: npm run test
+
+  # ---------------------------------------------------------------------------
+  # Bicep — compile + lint check. No live deploy.
+  # ---------------------------------------------------------------------------
+  bicep:
+    name: bicep (build + lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ hashFiles('hha-dashboard/infra/main.bicep') != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bicep CLI
+        run: |
+          curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+          chmod +x bicep
+          sudo mv bicep /usr/local/bin/bicep
+          bicep --version
+
+      - name: Build main + modules
+        working-directory: hha-dashboard/infra
+        run: |
+          bicep build main.bicep --outfile /tmp/main.json
+          bicep build modules/postgres.bicep --outfile /tmp/postgres.json
+          bicep build modules/appservice.bicep --outfile /tmp/appservice.json
+
+      - name: Build parameter files
+        working-directory: hha-dashboard/infra
+        run: |
+          bicep build-params env/dev.bicepparam --outfile /tmp/dev.params.json
+          bicep build-params env/prod.bicepparam --outfile /tmp/prod.params.json
+
+      - name: Lint
+        working-directory: hha-dashboard/infra
+        run: |
+          bicep lint main.bicep
+          bicep lint modules/postgres.bicep
+          bicep lint modules/appservice.bicep
