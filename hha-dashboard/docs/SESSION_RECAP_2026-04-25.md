@@ -1,6 +1,6 @@
 # Session recap — 2026-04-25
 
-Five PRs landed in flight today. None merged yet; all open against `main`.
+Six PRs landed in flight today. None merged yet; all open against `main`.
 
 ## Snapshot
 
@@ -11,8 +11,9 @@ Five PRs landed in flight today. None merged yet; all open against `main`.
 | #11 | `chore/web-bump-next-cve` | chore(web): bump next 15.1.0 → 15.5.15 (security backport) | (build verified) | ~3,900 lockfile |
 | #12 | `chore/web-bump-vitest` | chore(web): bump vitest 2.1.6 → 4.1.5 (security backport) | (build verified) | ~3,800 lockfile |
 | #13 | `feat/session-8-bicep-scaffold` | feat(infra): Bicep scaffold — postgres + app service (compile-only) | `az bicep build` + `lint` clean | ~700 |
+| #14 | `ci/github-actions-base` | ci: GitHub Actions workflow (api + web + bicep) | (workflow YAML, runs on every PR) | ~150 |
 
-Combined: **41 new tests, 5 new feature modules, 0 advisories remaining after #11+#12 merge.**
+Combined: **41 new tests, 5 new feature modules, 1 CI workflow, 0 advisories remaining after #11+#12 merge.**
 
 ## What each PR delivers
 
@@ -100,11 +101,12 @@ Verification = `az bicep build` + `az bicep build-params` + `az bicep lint` only
 
 ## Next session candidates (ranked by leverage)
 
-1. **Session 9: VNet + Key Vault** — closes the public-Postgres gap, brings real secret management. Requires #13 merged first (or stack on top of it). Multi-day if done well.
-2. **Session 10: Blob Storage + Container Apps Jobs** — unlocks the upload pipeline cron (`paycom_sync`, `pg_backup`) end-to-end. Prerequisite for restore drills.
-3. **Session 11: Application Insights + Log Analytics + RBAC** — observability + audit telemetry. Prerequisite for HIPAA audit-trail diagnostic settings.
-4. **GitHub Actions OIDC + CI** — automate test + lint runs on every PR. Should land before more parallel PRs accumulate.
-5. **`mgma_benchmarks` table + admin UI** — real schema replaces the constants in `comp.py`. Requires HHA's licensed values to be available.
+1. **Merge #11, #12, #14 first** — clears the security backlog and turns CI on. Should happen before any new PR.
+2. **Session 9: VNet + Key Vault** — closes the public-Postgres gap, brings real secret management. Requires #13 merged first (or stack on top of it). Multi-day if done well.
+3. **Session 10: Blob Storage + Container Apps Jobs** — unlocks the upload pipeline cron (`paycom_sync`, `pg_backup`) end-to-end. Prerequisite for restore drills.
+4. **Session 11: Application Insights + Log Analytics + RBAC** — observability + audit telemetry. Prerequisite for HIPAA audit-trail diagnostic settings.
+5. **GitHub Actions OIDC + deploy workflows** — `deploy-dev.yml` + `deploy-prod.yml` (federated identity to Azure). Build on PR #14's CI workflow. Lands with Session 9.
+6. **`mgma_benchmarks` table + admin UI** — real schema replaces the constants in `comp.py`. Requires HHA's licensed values to be available.
 
 ## Things I noticed but didn't fix
 
