@@ -6,7 +6,17 @@
 
 HHA Medicine Operations Dashboard — an Azure-only, HIPAA-first analytics platform for HHA exec leadership. Single Next.js + FastAPI + PostgreSQL stack. Solo build with Claude Code.
 
-Build plan lives in [DASHBOARD_PLAN.md](../DASHBOARD_PLAN.md) (root of the OneDrive project folder). ADRs live in [docs/adr/](docs/adr/). Read both before any significant work.
+Build plan lives in [DASHBOARD_PLAN.md](../DASHBOARD_PLAN.md) (root of the OneDrive project folder). ADRs live in [docs/adr/](docs/adr/). Operational procedures live in [docs/RUNBOOK.md](docs/RUNBOOK.md). Read all three before any significant work.
+
+**Authoritative ADRs (in priority order):**
+
+- [ADR-001 — HIPAA data classification](docs/adr/001-hipaa-data-classification.md) — column-level `data_class` rules, no-PHI invariant, BAA inventory
+- [ADR-002 — RBAC model](docs/adr/002-rbac-model.md) — Entra groups, `comp_viewer` additive flag, separate census portal threat model
+- [ADR-003 — Audit chain](docs/adr/003-audit-chain.md) — why PG triggers (not ORM listeners), how `audit.upn` GUC propagates, what's audited
+- [ADR-004 — Backup & DR](docs/adr/004-backup-and-disaster-recovery.md) — managed + custom pg_backup, WORM lock, restore drill, RTO/RPO commitments
+- [ADR-005 — FL/TX scope split](docs/adr/005-fl-tx-scope-split.md) — Ventra is FL-only, TX is manual-only, `source_system` invariant
+
+**Operational reference:** [docs/RUNBOOK.md](docs/RUNBOOK.md) — first-deploy procedure, incident playbooks, secret rotation, restore drill invocation. The 2 a.m. document.
 
 ## Who uses it
 
