@@ -1,19 +1,20 @@
 # Session recap — 2026-04-25
 
-Six PRs landed in flight today. None merged yet; all open against `main`.
+Six PRs landed in flight today, all merged in the same session. Plus a follow-on autonomous block (#15) extending the Bicep scaffold with VNet + Key Vault.
 
 ## Snapshot
 
-| PR | Branch | Title | Tests | LOC |
-|---|---|---|---|---|
-| #9 | `feat/session-6-msal` | feat(web): MSAL wiring with dev-stub fallback | 20 vitests | ~1,500 |
-| #10 | `feat/session-7-scorecards` | feat: Doctor Scorecards with MGMA Internal Medicine band classification | 21 pytests | ~700 |
-| #11 | `chore/web-bump-next-cve` | chore(web): bump next 15.1.0 → 15.5.15 (security backport) | (build verified) | ~3,900 lockfile |
-| #12 | `chore/web-bump-vitest` | chore(web): bump vitest 2.1.6 → 4.1.5 (security backport) | (build verified) | ~3,800 lockfile |
-| #13 | `feat/session-8-bicep-scaffold` | feat(infra): Bicep scaffold — postgres + app service (compile-only) | `az bicep build` + `lint` clean | ~700 |
-| #14 | `ci/github-actions-base` | ci: GitHub Actions workflow (api + web + bicep) | (workflow YAML, runs on every PR) | ~150 |
+| PR | Branch | Title | Tests | LOC | Status |
+|---|---|---|---|---|---|
+| #9 | `feat/session-6-msal` | feat(web): MSAL wiring with dev-stub fallback | 20 vitests | ~1,500 | merged |
+| #10 | `feat/session-7-scorecards` | feat: Doctor Scorecards with MGMA Internal Medicine band classification | 21 pytests | ~700 | merged |
+| #11 | `chore/web-bump-next-cve` | chore(web): bump next 15.1.0 → 15.5.15 (security backport) | (build verified) | ~3,900 lockfile | merged |
+| #12 | `chore/web-bump-vitest` | chore(web): bump vitest 2.1.6 → 4.1.5 (security backport) | 20 vitests on rebase | ~3,800 lockfile | merged |
+| #13 | `feat/session-8-bicep-scaffold` | feat(infra): Bicep scaffold — postgres + app service (compile-only) | `az bicep build` + `lint` clean | ~700 | merged |
+| #14 | `ci/github-actions-base` | ci: GitHub Actions workflow (api + web + bicep) | (workflow YAML, runs on every PR) | ~150 | merged |
+| #15 | `feat/session-9-vnet-keyvault` | feat(infra): VNet + Key Vault Bicep modules (compile-only) | `az bicep build` + `lint` clean | ~500 | open (autonomous block) |
 
-Combined: **41 new tests, 5 new feature modules, 1 CI workflow, 0 advisories remaining after #11+#12 merge.**
+Combined: **41 new tests, 7 new infra/feature modules, 1 CI workflow, 0 critical advisories remaining.**
 
 ## What each PR delivers
 
@@ -83,6 +84,22 @@ infra/
 2. **Repo-root `.gitignore`** had unscoped `env/` (Python venv pattern) shadowing `infra/env/`. Fixed in the same PR — scoped to `hha-dashboard/api/env/` and `hha-dashboard/jobs/*/env/`.
 
 Verification = `az bicep build` + `az bicep build-params` + `az bicep lint` only. **No live deploy** — explicitly out of scope.
+
+### PR #15 — VNet + Key Vault (autonomous block, after #13 merged)
+
+Adds two new Bicep modules and threads two parameter toggles through the existing scaffold:
+
+- `modules/vnet.bicep` — VNet 10.20.0.0/16, three subnets (`app` delegated to `Microsoft.Web/serverFarms`, `postgres` delegated to `Microsoft.DBforPostgreSQL/flexibleServers`, `private-endpoints` for KV/future PEs), two private DNS zones (`privatelink.postgres.database.azure.com` + `privatelink.vaultcore.azure.net`), VNet links for both zones.
+- `modules/keyvault.bicep` — KV with RBAC auth, 90-day soft-delete + purge protection, `networkAcls.defaultAction: Deny`. Conditionally creates a private endpoint + DNS zone group when `pe_subnet_id` is non-empty; otherwise stays public with the deployer-IP allowlist (dev posture).
+- `modules/postgres.bicep` (modify) — adds optional `delegated_subnet_id` + `private_dns_zone_id` parameters. When set, switches to VNet injection (`publicNetworkAccess: Disabled`, server NIC in the delegated subnet, no public address) and skips the deployer firewall rule. **Backward-compatible**: when both empty, behavior is identical to Session 8.
+- `main.bicep` (modify) — adds `enable_vnet bool = false` + `enable_keyvault bool = false` toggles, conditional module references with `vnet!` non-null assertions to keep types right. Outputs `vault_uri`, `vault_name`, `vnet_id`, `app_subnet_id` for Session 10.
+- `env/dev.bicepparam` — toggles=false (zero-cost dev posture, matches Session 8).
+- `env/prod.bicepparam` — toggles=true (full private posture; ~$30/mo VNet+PE overhead).
+- `infra/README.md` — appended a "two postures" table and a known-gap callout for the App Service ↔ VNet wiring (Session 10).
+
+**Known temporary gap (documented in README)**: when `enable_vnet=true`, Postgres is private but App Service VNet integration isn't wired yet. Don't deploy with `enable_vnet=true` to a running env until Session 10 ships, or App Service can't reach the database. Dev (`enable_vnet=false`) keeps working.
+
+Verification = compile-only (`az bicep build` + `lint`). 4 of 4 lint checks clean.
 
 ## Recommended merge order
 
