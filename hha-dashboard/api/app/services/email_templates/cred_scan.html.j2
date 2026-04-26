@@ -1,0 +1,53 @@
+{# Credential expiry digest. One per owner, grouped by physician. #}
+<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f5f6fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1f2937;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f6fa;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px 28px;border-bottom:1px solid #fef3c7;background:linear-gradient(135deg,#b45309,#d97706);color:#ffffff;">
+                <div style="font-size:14px;letter-spacing:0.05em;text-transform:uppercase;opacity:0.85;">HHA Operations Dashboard</div>
+                <div style="font-size:22px;font-weight:600;margin-top:4px;">Credentials expiring soon</div>
+                <div style="font-size:13px;margin-top:6px;opacity:0.85;">Scan run on {{ scan_date }}</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px;">
+                <p style="margin:0 0 16px 0;font-size:14px;color:#4b5563;">
+                  {{ items|length }} credential{{ 's' if items|length != 1 else '' }} crossed a 30/60/90-day expiry threshold since the last scan.
+                </p>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+                  <thead>
+                    <tr style="background:#f9fafb;">
+                      <th align="left" style="padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;border-bottom:1px solid #e5e7eb;">Physician</th>
+                      <th align="left" style="padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;border-bottom:1px solid #e5e7eb;">Credential</th>
+                      <th align="left" style="padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;border-bottom:1px solid #e5e7eb;">Expires</th>
+                      <th align="left" style="padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;border-bottom:1px solid #e5e7eb;">Band</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for item in items %}
+                    <tr>
+                      <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #f3f4f6;">{{ item.physician_name }}</td>
+                      <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #f3f4f6;color:#374151;">{{ item.credential_type }}</td>
+                      <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #f3f4f6;">{{ item.expires_on }}</td>
+                      <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #f3f4f6;color:{{ band_colors[item.threshold_band] }};font-weight:600;">≤ {{ item.threshold_band }} d</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 28px;border-top:1px solid #fef3c7;background:#fafafa;font-size:12px;color:#6b7280;">
+                You receive this because you're listed in the alert subscription table for credential expiries. To opt out, contact ops.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

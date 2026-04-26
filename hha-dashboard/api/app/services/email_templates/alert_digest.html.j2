@@ -1,0 +1,52 @@
+{# Daily alert digest. Inline-styled for gmail/outlook compatibility. #}
+<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f5f6fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1f2937;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f6fa;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px 28px;border-bottom:1px solid #eef2ff;background:linear-gradient(135deg,#4338ca,#6366f1);color:#ffffff;">
+                <div style="font-size:14px;letter-spacing:0.05em;text-transform:uppercase;opacity:0.85;">HHA Operations Dashboard</div>
+                <div style="font-size:22px;font-weight:600;margin-top:4px;">Alert digest — {{ target_date }}</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px;">
+                {% if alerts %}
+                <p style="margin:0 0 16px 0;font-size:14px;color:#4b5563;">
+                  {{ alerts|length }} flag{{ 's' if alerts|length != 1 else '' }} surfaced from yesterday's data.
+                </p>
+                {% for alert in alerts %}
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:14px;border:1px solid #e5e7eb;border-left:4px solid {{ severity_colors[alert.severity] }};border-radius:8px;">
+                  <tr>
+                    <td style="padding:14px 16px;">
+                      <div style="font-size:11px;letter-spacing:0.05em;text-transform:uppercase;color:#6b7280;font-weight:600;">
+                        {{ alert.category }} · {{ alert.severity }}
+                      </div>
+                      <div style="font-size:16px;font-weight:600;margin-top:4px;">{{ alert.title }}</div>
+                      <div style="font-size:14px;color:#374151;margin-top:6px;">{{ alert.detail }}</div>
+                      <div style="font-size:12px;color:#6b7280;margin-top:8px;">Owner: {{ alert.owner }}</div>
+                    </td>
+                  </tr>
+                </table>
+                {% endfor %}
+                {% else %}
+                <p style="margin:0;padding:24px;text-align:center;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;color:#166534;font-size:14px;">
+                  No flags from yesterday's data — every monitored metric is within threshold.
+                </p>
+                {% endif %}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 28px;border-top:1px solid #eef2ff;background:#fafafa;font-size:12px;color:#6b7280;">
+                Sent automatically by the HHA dashboard alert digest cron. To change recipients or frequency, contact ops.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

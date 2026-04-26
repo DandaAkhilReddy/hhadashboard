@@ -73,6 +73,30 @@ class Settings(BaseSettings):
         "text/csv",
     )
 
+    # ---------- Email (Azure Communication Services) ----------
+    # Bicep `infra/modules/acs-email.bicep` provisions ACS + an Azure Managed
+    # Domain. The endpoint and sender address are passed to App Service +
+    # Container Apps Jobs via app_settings/env_vars when `enable_email=true`.
+    # Local dev / unit tests can also feed a connection string instead of MI.
+    azure_communication_endpoint: str = ""
+    azure_communication_sender: str = ""
+    # Connection string is optional — preferred path is managed identity in prod.
+    # Set this in dev when you want to actually exercise ACS end-to-end without
+    # MI on a workstation.
+    azure_communication_connection_string: str = ""
+
+    @property
+    def email_configured(self) -> bool:
+        """True when we can send email — need a sender address AND either
+        a managed-identity-able endpoint or an explicit connection string."""
+        return bool(
+            self.azure_communication_sender
+            and (
+                self.azure_communication_connection_string
+                or self.azure_communication_endpoint
+            )
+        )
+
     # ---------- Paycom workforce sync ----------
     # API enablement was requested with a 4–6 wk window. Until access is
     # granted, jobs/paycom_sync runs as a no-op stub when these are blank.

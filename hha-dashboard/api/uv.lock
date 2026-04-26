@@ -159,6 +159,20 @@ wheels = [
 ]
 
 [[package]]
+name = "azure-communication-email"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "azure-core" },
+    { name = "isodate" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/97/de/f71191ead5e778a7d8939744977a049f796f6fb6549847c667fad373605e/azure_communication_email-1.1.0.tar.gz", hash = "sha256:6a4af8281024327c3ab18a4996919069a99a69aad3a19c40f7852a6682493327", size = 55546, upload-time = "2025-10-17T20:30:23.349Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/97/fe/9bd1028853c4b351c756ba4acc39ef5b5914a3452ebe2df0b8ddd6051114/azure_communication_email-1.1.0-py3-none-any.whl", hash = "sha256:9212153f21cf7e68734c32ebfe8702b43398bd01df2dddb0ca52cd5a8bbd5024", size = 64170, upload-time = "2025-10-17T20:30:24.829Z" },
+]
+
+[[package]]
 name = "azure-core"
 version = "1.39.0"
 source = { registry = "https://pypi.org/simple" }
@@ -761,11 +775,13 @@ dependencies = [
     { name = "argon2-cffi" },
     { name = "asyncpg" },
     { name = "azure-ai-documentintelligence" },
+    { name = "azure-communication-email" },
     { name = "azure-identity" },
     { name = "azure-keyvault-secrets" },
     { name = "azure-storage-blob" },
     { name = "fastapi", extra = ["standard"] },
     { name = "httpx" },
+    { name = "jinja2" },
     { name = "msal" },
     { name = "openpyxl" },
     { name = "pandas" },
@@ -796,11 +812,13 @@ requires-dist = [
     { name = "argon2-cffi", specifier = ">=23.1.0" },
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "azure-ai-documentintelligence", specifier = ">=1.0.0" },
+    { name = "azure-communication-email", specifier = ">=1.0.0" },
     { name = "azure-identity", specifier = ">=1.19.0" },
     { name = "azure-keyvault-secrets", specifier = ">=4.9.0" },
     { name = "azure-storage-blob", specifier = ">=12.23.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.0" },
+    { name = "jinja2", specifier = ">=3.1.0" },
     { name = "msal", specifier = ">=1.31.0" },
     { name = "openpyxl", specifier = ">=3.1.0" },
     { name = "pandas", specifier = ">=2.2.0" },
