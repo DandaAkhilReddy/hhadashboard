@@ -43,7 +43,13 @@ jobs:
           --health-retries 10
 
     env:
-      ENV: ci
+      # Dev mode here is intentional: the existing test suite hits FastAPI
+      # with Authorization: Dev <role> headers, which only the dev-stub
+      # branch in app/deps.py::get_current_user accepts. ENV=ci would make
+      # those tests 401 across the board (real Entra JWT verification path
+      # has no test fixture). Real prod-mode CI lands with deploy-prod.yml
+      # in Session 10, separately.
+      ENV: dev
       LOG_LEVEL: INFO
       DATABASE_URL: postgresql+asyncpg://hha:hha@localhost:5432/hha_dashboard
       DATABASE_URL_SYNC: postgresql+psycopg://hha:hha@localhost:5432/hha_dashboard
