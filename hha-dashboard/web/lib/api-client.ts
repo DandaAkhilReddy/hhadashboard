@@ -246,6 +246,8 @@ export type OpenPositionBySite = {
   severity: "high" | "medium" | "low";
 };
 
+export type MgmaBand = "below_25" | "25_50" | "50_75" | "75_90" | "above_90";
+
 export type Scorecard = {
   physician_id: number;
   name: string;
@@ -257,6 +259,13 @@ export type Scorecard = {
   rank: number;
   rvu_90d: number;
   below_fmv: boolean;
+  // MGMA Internal Medicine Hospitalist comparison
+  mgma_band: MgmaBand;
+  mgma_p50_usd: number;
+  // comp_viewer-only — null for non-comp-viewers
+  effective_comp_usd: number | null;
+  fmv_source_note: string | null;
+  // P2+ tiles
   revenue_per_fte_usd: number | null;
   encounters_per_day: number | null;
   documentation_score_pct: number | null;

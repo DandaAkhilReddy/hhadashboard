@@ -605,6 +605,10 @@ def get_open_positions_by_site() -> list[dict]:
 
 @dataclass(frozen=True)
 class MDSpec:
+    """Demo physician used by the Scorecards page until real comp_agreements
+    land in the DB. `effective_comp_usd` here drives the MGMA-band math in
+    services/comp.py — change a value to see the band shift."""
+
     name: str
     site: str
     state: str
@@ -613,23 +617,42 @@ class MDSpec:
     status: str
     rank: int
     rvu_90d: int
-    below_fmv: bool
+    effective_comp_usd: int
 
 
+# Effective comp values are illustrative — they bracket the MGMA IM
+# Hospitalist 25/50/75/90 percentile lines so each band is represented.
 SCORECARD_MDS: tuple[MDSpec, ...] = (
-    MDSpec("Dr. Susan Hanson",    "JFK Main Med Ctr",    "FL", "W2",   "SALARY",   "ACTIVE", 2,  1247, False),
-    MDSpec("Dr. Thomas Abraham",  "Palms West Hospital", "FL", "1099", "PER_DIEM", "ACTIVE", 5,  1102, False),
-    MDSpec("Dr. Esam Khalifa",    "Jackson Memorial",    "FL", "1099", "RVU",      "ACTIVE", 7,  1038, False),
-    MDSpec("Dr. Dario Martinez",  "JFK North Med Ctr",   "FL", "W2",   "HYBRID",   "ACTIVE", 12, 892,  True),
-    MDSpec("Dr. Ashkan Jafarbay", "University Hospital", "FL", "W2",   "SALARY",   "ACTIVE", 18, 768,  False),
-    MDSpec("Dr. Manzoor Bevinal", "Bay / Doctors / Huntsville", "TX", "1099", "PER_DIEM", "ACTIVE", 22, 710, False),
-    MDSpec("Dr. Franklyn",        "Woodmont Hospital",   "FL", "W2",   "SALARY",   "PIP",    47, 641,  True),
+    MDSpec("Dr. Susan Hanson",    "JFK Main Med Ctr",    "FL", "W2",   "SALARY",   "ACTIVE", 2,  1247, 410_000),
+    MDSpec("Dr. Thomas Abraham",  "Palms West Hospital", "FL", "1099", "PER_DIEM", "ACTIVE", 5,  1102, 360_000),
+    MDSpec("Dr. Esam Khalifa",    "Jackson Memorial",    "FL", "1099", "RVU",      "ACTIVE", 7,  1038, 340_000),
+    MDSpec("Dr. Dario Martinez",  "JFK North Med Ctr",   "FL", "W2",   "HYBRID",   "ACTIVE", 12, 892,  255_000),
+    MDSpec("Dr. Ashkan Jafarbay", "University Hospital", "FL", "W2",   "SALARY",   "ACTIVE", 18, 768,  295_000),
+    MDSpec("Dr. Manzoor Bevinal", "Bay / Doctors / Huntsville", "TX", "1099", "PER_DIEM", "ACTIVE", 22, 710, 305_000),
+    MDSpec("Dr. Franklyn",        "Woodmont Hospital",   "FL", "W2",   "SALARY",   "PIP",    47, 641,  240_000),
 )
 
 
-def get_scorecards() -> list[dict]:
-    return [
-        {
+def get_scorecards(*, include_comp_detail: bool = False) -> list[dict]:
+    """Return the scorecard rows.
+
+    Args:
+        include_comp_detail: When True (caller has comp_viewer), include
+            dollar-amount fields. Otherwise comp $ is redacted to None and
+            the UI shows only the qualitative MGMA band.
+    """
+    # Local import to avoid a circular: services.comp ↔ services.fake_data
+    from .comp import (
+        MGMA_SOURCE_NOTE,
+        compute_mgma_band,
+        is_below_fmv,
+        mgma_benchmark_50th_usd,
+    )
+
+    rows: list[dict] = []
+    p50 = mgma_benchmark_50th_usd()
+    for i, md in enumerate(SCORECARD_MDS):
+        rows.append({
             "physician_id": i + 1,
             "name": md.name,
             "site": md.site,
@@ -639,15 +662,18 @@ def get_scorecards() -> list[dict]:
             "status": md.status,
             "rank": md.rank,
             "rvu_90d": md.rvu_90d,
-            "below_fmv": md.below_fmv,
-            # P2+ tiles — null for now
+            "below_fmv": is_below_fmv(md.effective_comp_usd),
+            "mgma_band": compute_mgma_band(md.effective_comp_usd),
+            "mgma_p50_usd": p50,
+            "effective_comp_usd": md.effective_comp_usd if include_comp_detail else None,
+            "fmv_source_note": MGMA_SOURCE_NOTE if include_comp_detail else None,
+            # P2+ tiles — null until Athena lands
             "revenue_per_fte_usd": None,
             "encounters_per_day": None,
             "documentation_score_pct": None,
             "chart_turnaround_days": None,
-        }
-        for i, md in enumerate(SCORECARD_MDS)
-    ]
+        })
+    return rows
 
 
 # ----- Alerts -----
