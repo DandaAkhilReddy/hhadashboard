@@ -74,6 +74,18 @@ param enable_email = true
 // images land. Consumption plan billing scales with execution time only.
 param enable_container_jobs = true
 
+// ACR — ON in prod. Standard SKU gives 100GB storage + replication option
+// at $20/mo. Premium ($100+/mo) only needed for content trust signing or
+// VNet-private ACR. Image cleanup task scheduled post-deploy.
+param enable_acr = true
+param acr_sku = 'Standard'
+
+// RBAC — ON in prod. Wires AcrPull (cron jobs → ACR), Storage Blob Data
+// Contributor (pg_backup → backups/), and ACS Contributor (alert_digest +
+// cred_scan + api → ACS Email). All use system-assigned MIs — no static
+// credentials anywhere in the runtime.
+param enable_rbac = true
+
 // Entra IDs — populate from the prod app registrations.
 // Override at deploy time if these aren't yet committed.
 param azure_tenant_id = ''

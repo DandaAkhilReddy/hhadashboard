@@ -123,6 +123,16 @@ param enable_email bool = false
 @description('Enable Container Apps environment + the example pg_backup scheduled job. Other crons (paycom_sync, ventra_ingest, alert_digest, cred_scan) come as additional Job resources in follow-up PRs.')
 param enable_container_jobs bool = false
 
+@description('Enable Azure Container Registry. Required before any cron job can pull a real (non-placeholder) image. Default off; flip to true once you have a real CI image-push step. Adds ~$5/mo dev, ~$20/mo prod.')
+param enable_acr bool = false
+
+@description('ACR SKU. Basic for dev; Standard for prod with replication option.')
+@allowed(['Basic', 'Standard', 'Premium'])
+param acr_sku string = 'Basic'
+
+@description('Enable cross-resource RBAC role assignments (AcrPull, Storage Blob Data Contributor, ACS Contributor). Each role is independently gated on the underlying resource being deployed; this master toggle is for "skip RBAC entirely in dev to keep deploys fast."')
+param enable_rbac bool = false
+
 @description('Container image for the pg_backup job. Default is a Microsoft sample; replace with a real image once an Azure Container Registry exists.')
 param pg_backup_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 
@@ -156,6 +166,8 @@ var log_analytics_name = 'log-hha-${env_name}'
 var app_insights_name = 'appi-hha-${env_name}'
 var acs_name = 'acs-hha-${env_name}'
 var email_service_name = 'ecs-hha-${env_name}'
+// ACR rejects names with hyphens; convention is concatenated lowercase.
+var acr_name = 'acrhha${env_name}'
 
 // ---------------------------------------------------------------------------
 // Modules
@@ -257,6 +269,19 @@ module acsEmail './modules/acs-email.bicep' = if (enable_email) {
   }
 }
 
+// Azure Container Registry — hosts the cron job images. Required before
+// any cron can pull a non-placeholder image. dev defaults to off because
+// the placeholder MS sample image is sufficient for compile-only verification.
+module acr './modules/acr.bicep' = if (enable_acr) {
+  name: 'acr-deploy'
+  params: {
+    acr_name: acr_name
+    location: location
+    sku: acr_sku
+    tags: tags
+  }
+}
+
 // Container Apps environment + example pg_backup scheduled job. The
 // other 4 crons (paycom_sync, ventra_ingest, alert_digest, cred_scan)
 // land as additional Job resources in follow-up PRs once a Container
@@ -282,6 +307,24 @@ module containerjobs './modules/containerjobs.bicep' = if (enable_container_jobs
       ? '@Microsoft.KeyVault(VaultName=${kv_name};SecretName=database-url)'
       : database_url_literal
     tags: tags
+  }
+}
+
+// Cross-resource role assignments (AcrPull, Storage Blob Data Contributor,
+// ACS Contributor). Each assignment is independently gated on the
+// underlying resource being deployed, so partial-state envs degrade
+// cleanly. The master `enable_rbac` toggle exists so dev can skip role
+// propagation entirely (faster deploys; nothing in dev needs MI auth).
+module rbac './modules/rbac.bicep' = if (enable_rbac) {
+  name: 'rbac-deploy'
+  params: {
+    acr_id: enable_acr ? acr!.outputs.acr_id : ''
+    storage_id: enable_storage ? storage!.outputs.storage_id : ''
+    acs_id: enable_email ? acsEmail!.outputs.acs_id : ''
+    pg_backup_principal_id: enable_container_jobs ? containerjobs!.outputs.pg_backup_principal_id : ''
+    alert_digest_principal_id: enable_container_jobs ? containerjobs!.outputs.alert_digest_principal_id : ''
+    cred_scan_principal_id: enable_container_jobs ? containerjobs!.outputs.cred_scan_principal_id : ''
+    api_principal_id: appservice.outputs.api_principal_id
   }
 }
 
@@ -649,5 +692,11 @@ output acs_sender_address string = enable_email ? acsEmail!.outputs.sender_addre
 @description('Container Apps environment ID when enable_container_jobs is true; empty otherwise. Used to attach future Job resources (paycom_sync, alert_digest, etc).')
 output container_env_id string = enable_container_jobs ? containerjobs!.outputs.env_id : ''
 
-@description('pg_backup job principal ID (managed identity) when enable_container_jobs is true; empty otherwise. Wire to Storage Blob Data Contributor on the backups container in a follow-up.')
+@description('pg_backup job principal ID (managed identity) when enable_container_jobs is true; empty otherwise. Wired to Storage Blob Data Contributor + AcrPull via rbac.bicep.')
 output pg_backup_principal_id string = enable_container_jobs ? containerjobs!.outputs.pg_backup_principal_id : ''
+
+@description('ACR resource ID when enable_acr is true; empty otherwise. Used by deploy workflows for `az acr login`.')
+output acr_id string = enable_acr ? acr!.outputs.acr_id : ''
+
+@description('ACR login server (e.g. acrhhaprod.azurecr.io) when enable_acr is true; empty otherwise. Used by deploy workflows for image push.')
+output acr_login_server string = enable_acr ? acr!.outputs.login_server : ''

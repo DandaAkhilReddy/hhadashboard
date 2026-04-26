@@ -1,0 +1,173 @@
+name: deploy-prod
+
+# Manual deploy of the PROD environment via Azure OIDC federated identity.
+#
+# Differences from deploy-dev.yml:
+#   - environment: prod  (GitHub Environment with required reviewers /
+#                         approval gate set in repo settings)
+#   - Uses prod.bicepparam (P1v3 plan, GP postgres, ZoneRedundant HA, ...)
+#   - dry_run defaults to TRUE (must explicitly opt out for create)
+#   - Concurrency group is shared with deploy-dev (deploys sequenced
+#     across envs to avoid step-on-toes during a coordinated rollout)
+#
+# One-time setup (operator runs once, see infra/bootstrap.sh):
+#   az ad app federated-credential create \
+#     --id <github-actions-app-client-id> \
+#     --parameters '{
+#       "name": "github-deploy-prod",
+#       "issuer": "https://token.actions.githubusercontent.com",
+#       "subject": "repo:DandaAkhilReddy/hhadashboard:environment:prod",
+#       "audiences": ["api://AzureADTokenExchange"]
+#     }'
+#
+# Note the subject pattern: `:environment:prod` instead of `:ref:refs/heads/main`.
+# That binds the federated identity to the GitHub Environment, which
+# requires manual approval from the configured reviewers BEFORE the OIDC
+# token is even issued. Two-key locked.
+#
+# Repository variables required (Settings → Secrets and variables → Actions → Variables):
+#   AZURE_CLIENT_ID         — federated credential's app id (can be the same
+#                             app reg as dev, but the federated-credential
+#                             entry above is environment-bound)
+#   AZURE_TENANT_ID         — HHA's M365 tenant id
+#   AZURE_SUBSCRIPTION_ID   — hha-production subscription id
+#   AZURE_TENANT_ID_FOR_KV  — same as AZURE_TENANT_ID (KV requires it as a
+#                             non-output param even with RBAC auth)
+#
+# Repository secrets required (Settings → ... → Secrets):
+#   POSTGRES_ADMIN_PASSWORD_PROD — fetched from KV by ops; copy here for
+#                                  the workflow to thread through to the
+#                                  bicep param. NEVER write to logs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'what-if only (no changes) — DEFAULT TRUE for prod safety'
+        required: false
+        type: boolean
+        default: true
+      confirm:
+        description: 'Type "deploy-prod" to confirm a non-dry-run deploy'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write    # required for OIDC token exchange
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false   # never cancel a deploy mid-flight
+
+jobs:
+  deploy:
+    name: az deployment group ${{ inputs.dry_run && 'what-if' || 'create' }} (PROD)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      # GitHub Environment named "prod" — configure required reviewers in
+      # repo Settings → Environments → prod. The workflow blocks here
+      # until an approver clicks "Approve and deploy."
+      name: prod
+      url: https://app-hha-web-prod.azurewebsites.net
+
+    env:
+      ENV_NAME: prod
+      RG: rg-hha-dashboard-prod
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate confirm string for non-dry-run
+        if: ${{ !inputs.dry_run }}
+        run: |
+          if [ "${{ inputs.confirm }}" != "deploy-prod" ]; then
+            echo "::error::To run a non-dry-run prod deploy you must type 'deploy-prod' in the confirm field. Got: '${{ inputs.confirm }}'"
+            exit 1
+          fi
+          echo "::notice::Confirmed by operator. Proceeding with az deployment group create."
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve deployer IP
+        id: ip
+        run: |
+          # Runner outbound IP — added as a transient firewall rule so
+          # bootstrap.sh can run from the same workflow if needed. Removed
+          # post-deploy because the rule is named after the IP and the
+          # next runner has a different IP anyway.
+          ip=$(curl -s https://api.ipify.org)
+          echo "deployer_ip=$ip" >> "$GITHUB_OUTPUT"
+          echo "::notice::Runner outbound IP for this run: $ip"
+
+      - name: Pre-flight — confirm bicepparam is for prod
+        working-directory: hha-dashboard/infra
+        run: |
+          # Defense in depth — make sure no one accidentally points
+          # this workflow at dev.bicepparam. The bicepparam file declares
+          # env_name; we grep for it.
+          if ! grep -q "env_name = 'prod'" env/prod.bicepparam; then
+            echo "::error::env/prod.bicepparam does not declare env_name='prod'. Refusing to deploy."
+            exit 1
+          fi
+
+      - name: az bicep what-if
+        if: ${{ inputs.dry_run }}
+        working-directory: hha-dashboard/infra
+        run: |
+          PG_PASSWORD='${{ secrets.POSTGRES_ADMIN_PASSWORD_PROD }}'
+          if [ -z "$PG_PASSWORD" ]; then
+            PG_PASSWORD='__placeholder__'
+            echo "::warning::POSTGRES_ADMIN_PASSWORD_PROD not set — what-if will use placeholder. Real deploy requires the secret."
+          fi
+
+          az deployment group what-if \
+            -g "$RG" \
+            -f main.bicep \
+            -p env/prod.bicepparam \
+            -p postgres_admin_password="$PG_PASSWORD" \
+            -p deployer_workstation_ip='${{ steps.ip.outputs.deployer_ip }}' \
+            -p azure_tenant_id_for_kv='${{ vars.AZURE_TENANT_ID_FOR_KV }}'
+
+      - name: az deployment group create
+        if: ${{ !inputs.dry_run }}
+        working-directory: hha-dashboard/infra
+        run: |
+          PG_PASSWORD='${{ secrets.POSTGRES_ADMIN_PASSWORD_PROD }}'
+          if [ -z "$PG_PASSWORD" ]; then
+            echo "::error::POSTGRES_ADMIN_PASSWORD_PROD not set. Run bootstrap.sh manually after first deploy then re-run this workflow with the secret populated."
+            exit 1
+          fi
+
+          az deployment group create \
+            -g "$RG" \
+            -f main.bicep \
+            -p env/prod.bicepparam \
+            -p postgres_admin_password="$PG_PASSWORD" \
+            -p deployer_workstation_ip='${{ steps.ip.outputs.deployer_ip }}' \
+            -p azure_tenant_id_for_kv='${{ vars.AZURE_TENANT_ID_FOR_KV }}' \
+            --query 'properties.provisioningState' -o tsv
+
+      - name: Print outputs
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "=== Deployment outputs ==="
+          az deployment group show \
+            -g "$RG" \
+            -n main \
+            --query 'properties.outputs' -o json
+          echo
+          echo "=== Next steps ==="
+          echo "1. Run bootstrap.sh from a workstation that can reach KV"
+          echo "2. Run scripts/seed_sites.py against the prod DB"
+          echo "3. Run infra/seed_alert_subscriptions.sh for each recipient"
+          echo "4. Run infra/census_seed.sh to set Crystal's portal credential"
+          echo "5. Smoke test: curl https://app-hha-api-prod.azurewebsites.net/ready"
+          echo "6. After ~3 successful nightly pg_backup runs, lock the WORM policy on backups/"
