@@ -56,6 +56,12 @@ param storage_soft_delete_retention_days = 7
 param enable_monitor = false
 param monitor_retention_days = 30
 
+// Email — off in dev. Mailpit (docker-compose service on port 8025)
+// catches outbound email at compose-up time, no real ACS needed.
+// Override to true if you want to validate the ACS Email path against
+// a real Azure Managed Domain.
+param enable_email = false
+
 // Entra IDs — empty in dev so the API falls back to the Authorization: Dev <role>
 // stub flow. When the Entra app registrations land per docs/ENTRA_SETUP.md,
 // fill these in or override at deploy time.
