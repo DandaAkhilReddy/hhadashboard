@@ -24,8 +24,30 @@ from jobs.pg_backup.backup import (
     _filename,
     _hash_url,
     _run_pg_dump,
+    _to_libpq_url,
     run_backup,
 )
+
+
+def test_to_libpq_url_strips_sqlalchemy_psycopg_suffix() -> None:
+    """pg_dump's libpq doesn't understand 'postgresql+psycopg://...'.
+    Without stripping, libpq falls back to a Unix socket and fails."""
+    assert (
+        _to_libpq_url("postgresql+psycopg://user:pw@host:5432/db")
+        == "postgresql://user:pw@host:5432/db"
+    )
+
+
+def test_to_libpq_url_strips_asyncpg_suffix() -> None:
+    assert (
+        _to_libpq_url("postgresql+asyncpg://user:pw@host/db")
+        == "postgresql://user:pw@host/db"
+    )
+
+
+def test_to_libpq_url_passes_plain_url_through() -> None:
+    plain = "postgresql://user:pw@host/db"
+    assert _to_libpq_url(plain) == plain
 
 
 def test_filename_is_sortable_iso8601() -> None:

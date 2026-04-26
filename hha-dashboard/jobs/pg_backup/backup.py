@@ -61,6 +61,19 @@ def _hash_url(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
 
 
+def _to_libpq_url(database_url: str) -> str:
+    """Strip SQLAlchemy driver suffix so libpq can parse the URL.
+
+    Example: ``postgresql+psycopg://user:pw@host/db`` → ``postgresql://user:pw@host/db``.
+    Without this, pg_dump silently falls back to the local Unix socket and
+    fails with "No such file or directory" — a bug that bit CI on first run.
+    """
+    if database_url.startswith("postgresql+"):
+        # postgresql+psycopg:// or postgresql+asyncpg:// → postgresql://
+        return "postgresql://" + database_url.split("://", 1)[1]
+    return database_url
+
+
 def _run_pg_dump(database_url: str, output_path: Path) -> None:
     """Invoke pg_dump synchronously. Raises BackupError on non-zero exit.
 
@@ -75,7 +88,7 @@ def _run_pg_dump(database_url: str, output_path: Path) -> None:
         "--no-owner",  # restore-side flexibility: target DB picks roles
         "--no-acl",  # we manage GRANTs separately
         "--file=" + str(output_path),
-        "--dbname=" + database_url,
+        "--dbname=" + _to_libpq_url(database_url),
     ]
     log.info("pg_dump.start path=%s", output_path)
     try:
