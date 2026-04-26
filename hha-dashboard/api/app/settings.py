@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     env: str = Field(default="dev")
     log_level: str = Field(default="INFO")
 
+    # Origin of the Next.js web App Service. Used to populate CORS
+    # allow_origins in non-dev modes. Bicep main.bicep emits the URL convention
+    # `https://app-hha-web-{env}.azurewebsites.net`; deploy script writes it
+    # to App Service env. Empty string in dev is fine — main.py uses the
+    # localhost dev fallback.
+    web_origin: str = ""
+
     database_url: str = Field(
         default="postgresql+asyncpg://hha:hha@localhost:5432/hha_dashboard"
     )
