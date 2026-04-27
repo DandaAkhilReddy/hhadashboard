@@ -6,7 +6,7 @@
 
 HHA Medicine Operations Dashboard — an Azure-only, HIPAA-first analytics platform for HHA exec leadership. Single Next.js + FastAPI + PostgreSQL stack. Solo build with Claude Code.
 
-Build plan lives in [DASHBOARD_PLAN.md](../DASHBOARD_PLAN.md) (root of the OneDrive project folder). ADRs live in [docs/adr/](docs/adr/). Operational procedures live in [docs/RUNBOOK.md](docs/RUNBOOK.md). Read all three before any significant work.
+Build plan lives in [DASHBOARD_PLAN.md](../DASHBOARD_PLAN.md) (root of the OneDrive project folder). System architecture in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). ADRs live in [docs/adr/](docs/adr/). Operational procedures in [docs/RUNBOOK.md](docs/RUNBOOK.md). Day-1 setup checklist in [docs/ONBOARDING.md](docs/ONBOARDING.md). Read all five before any significant work.
 
 **Authoritative ADRs (in priority order):**
 

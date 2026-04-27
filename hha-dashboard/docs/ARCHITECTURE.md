@@ -1,6 +1,37 @@
 # HHA Medicine — Operations Dashboard · Architecture
 
-> Companion to [DASHBOARD_PLAN.md](../../DASHBOARD_PLAN.md) (the what + why) and [docs/adr/001-hipaa-data-classification.md](adr/001-hipaa-data-classification.md) (the HIPAA rules). This doc is the **how** — every component, every data flow, every wire.
+> The canonical architecture entry point. Read this first.
+>
+> Companions: [DASHBOARD_PLAN.md](../../DASHBOARD_PLAN.md) (what + why · scope), [docs/ONBOARDING.md](ONBOARDING.md) (day-1 setup checklist), [docs/RUNBOOK.md](RUNBOOK.md) (operational procedures), [docs/adr/](adr/) (locked architectural decisions). This doc is the **how** — every component, every data flow, every wire.
+
+---
+
+## How to read this doc
+
+If you have **5 minutes**, read §1 (At a glance) — invariants, stack, one-page diagram. That alone tells you the shape.
+
+If you have **30 minutes**, also read §2 (The five planes) and skim §6 (Roles + RBAC). You'll know who can see what and where each piece lives.
+
+If you're building or operating, read it cover-to-cover. Then bookmark [RUNBOOK.md](RUNBOOK.md) for incident playbooks and [ONBOARDING.md](ONBOARDING.md) for environment setup.
+
+### Table of contents
+
+- §1 [At a glance](#1-at-a-glance) — invariants · stack · one-page diagram
+- §2 [The five planes](#2-the-five-planes) — identity / app / data / integration / ops
+- §3 [Component deep-dives](#3-component-deep-dives) — Entra · Next.js · FastAPI · Postgres · Container Apps Jobs · Key Vault · ACS Email · Blob · App Insights
+- §4 [Data model](#4-data-model) — schemas · tables · the 4 boards + Doctor Scorecards data shape
+- §5 [Data flows](#5-data-flows) — login · daily census · monthly finance · alerts · Ventra ingest · Paycom sync
+- §6 [Auth + RBAC](#6-auth--rbac) — 7 Entra groups · `comp_viewer` additive flag · enforcement layer
+- §7 [HIPAA posture](#7-hipaa-posture) — Tier A/B/C/D · forbidden columns · pre-aggregate rule · audit chain
+- §8 [CI/CD](#8-cicd) — GitHub Actions · OIDC federated identity · keyless deploy
+- §9 [Local dev](#9-local-dev) — docker-compose · Mailpit · Adminer
+- §10 [Observability](#10-observability) — App Insights · Log Analytics · structured logs
+- §11 [Disaster recovery](#11-disaster-recovery) — managed PITR · pg_backup WORM · restore drill RTO/RPO
+- §12 [Cost model (estimated monthly)](#12-cost-model-estimated-monthly)
+- §13 [Decisions intentionally deferred](#13-decisions-intentionally-deferred)
+- §14 [Reference: file-to-component cross-walk](#14-reference-file-to-component-cross-walk)
+
+For day-1 environment setup, jump to [docs/ONBOARDING.md](ONBOARDING.md).
 
 ---
 
