@@ -11,9 +11,9 @@
 import { isMsalConfigured, loginScopes } from "@/lib/auth/msal-config";
 import { useMsal } from "@azure/msal-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
-export default function SignInPage() {
+function SignInInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const msalConfigured = isMsalConfigured();
@@ -56,5 +56,15 @@ export default function SignInPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense
+      fallback={<div className="mx-auto mt-32 max-w-md text-center text-sm text-slate-500">Loading…</div>}
+    >
+      <SignInInner />
+    </Suspense>
   );
 }

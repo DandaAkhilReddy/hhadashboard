@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "@/components/Toast";
-import { api } from "@/lib/api-client";
+import { useApiBrowser } from "@/lib/api-browser";
 import { cn } from "@/lib/format";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -22,6 +22,7 @@ export function SiteCensusForm({
   initialNotes: string | null;
 }) {
   const router = useRouter();
+  const api = useApiBrowser();
   const [census, setCensus] = useState(String(initialCensus));
   const [openShifts, setOpenShifts] = useState(String(initialOpenShifts));
   const [notes, setNotes] = useState(initialNotes ?? "");
