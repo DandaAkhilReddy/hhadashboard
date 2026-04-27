@@ -13,7 +13,7 @@
 import { apiScope, isMsalConfigured } from "@/lib/auth/msal-config";
 import { useMsal } from "@azure/msal-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 async function postSession(accessToken: string, expiresAt: number): Promise<void> {
   const res = await fetch("/api/auth/session", {
@@ -26,7 +26,7 @@ async function postSession(accessToken: string, expiresAt: number): Promise<void
   }
 }
 
-export default function AuthCallbackPage() {
+function AuthCallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const msal = useMsal();
@@ -78,5 +78,17 @@ export default function AuthCallbackPage() {
         <span className="text-slate-500">Completing sign-in…</span>
       )}
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto mt-32 max-w-md text-center text-sm text-slate-500">Loading…</div>
+      }
+    >
+      <AuthCallbackInner />
+    </Suspense>
   );
 }
