@@ -11,6 +11,8 @@
     "gen-types": "openapi-typescript http://localhost:8000/openapi.json -o lib/api-types.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium --with-deps",
     "prepare": "node ./scripts/install-git-hooks.cjs"
   },
   "lint-staged": {
@@ -31,6 +33,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@playwright/test": "^1.59.1",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

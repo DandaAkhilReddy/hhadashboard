@@ -111,6 +111,50 @@ jobs:
         run: npm run test
 
   # ---------------------------------------------------------------------------
+  # E2E — Playwright Chromium. Hermetic: a tiny Node mock-api at port 8123
+  # serves canned JSON for every endpoint /auth/sign-in and /operations
+  # touch, so this job needs no Postgres, no Python, and no FastAPI.
+  # Playwright config (web/playwright.config.ts) starts both mock-api and
+  # next dev on port 3101 with NEXT_PUBLIC_API_BASE_URL pointed at the mock.
+  # Audit ticket T9.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: e2e (playwright chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: web  # gate on lint + vitest first; no point running e2e if those fail
+    defaults:
+      run:
+        working-directory: hha-dashboard/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: hha-dashboard/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run Playwright tests
+        run: npm run e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: hha-dashboard/web/playwright-report/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
   # Bicep — compile + lint check. No live deploy.
   # Skips cleanly if infra/ doesn't exist (early-checkout test).
   # ---------------------------------------------------------------------------
