@@ -6,18 +6,27 @@ from pydantic import BaseModel
 
 
 class SiteToday(BaseModel):
+    """One row of the Operations Board.
+
+    Phase 1 contract: only `id`, `name`, `state`, and `annual_subsidy_usd` are
+    guaranteed non-null. Every other field is `None` until real operational
+    data lands (census + open_shifts from a portal/owner-form entry; MD,
+    liaison, contract details from masters tables once admins populate them).
+    The frontend renders `null` as "—" everywhere.
+    """
+
     id: int
     name: str
     state: str
     medical_director: str | None
-    md_status: str
+    md_status: str | None
     liaison: str | None
-    census_today: int
-    census_3mo_avg: int
-    mtd_avg: float
-    variance_pct: float
-    open_shifts: int
-    contract_end: str
+    census_today: int | None
+    census_3mo_avg: int | None
+    mtd_avg: float | None
+    variance_pct: float | None
+    open_shifts: int | None
+    contract_end: str | None
     annual_subsidy_usd: int
 
 

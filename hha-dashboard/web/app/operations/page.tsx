@@ -100,18 +100,24 @@ export default async function OperationsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {fl.map((s) => {
+                // Phase 1: variance/open_shifts can be null. The frontend renders
+                // "—" everywhere a null arrives; tone classes fall back to neutral.
                 const tone =
-                  s.variance_pct < -15
-                    ? "text-red-600"
-                    : s.variance_pct < 0
-                      ? "text-amber-600"
-                      : "text-emerald-600";
-                const shiftsTone =
-                  s.open_shifts === 0
-                    ? "text-emerald-600"
-                    : s.open_shifts >= 3
+                  s.variance_pct === null
+                    ? "text-slate-400"
+                    : s.variance_pct < -15
                       ? "text-red-600"
-                      : "text-amber-600";
+                      : s.variance_pct < 0
+                        ? "text-amber-600"
+                        : "text-emerald-600";
+                const shiftsTone =
+                  s.open_shifts === null
+                    ? "text-slate-400"
+                    : s.open_shifts === 0
+                      ? "text-emerald-600"
+                      : s.open_shifts >= 3
+                        ? "text-red-600"
+                        : "text-amber-600";
                 return (
                   <tr key={s.name} className="group transition-colors hover:bg-indigo-50/40">
                     <td className="px-3 py-3 font-semibold text-slate-900">
@@ -134,35 +140,37 @@ export default async function OperationsPage() {
                           ) : null}
                         </span>
                       ) : (
-                        <span className="font-semibold text-red-600">VACANT</span>
+                        <span className="text-slate-400">—</span>
                       )}
                     </td>
                     <td className="px-3 py-3 text-xs text-slate-500">{s.liaison ?? "—"}</td>
                     <td
                       className={`px-3 py-3 text-center text-base font-bold tabular-nums ${tone}`}
                     >
-                      {s.census_today}
+                      {s.census_today ?? "—"}
                     </td>
                     <td className="px-3 py-3 text-center tabular-nums text-slate-500">
-                      {s.census_3mo_avg}
+                      {s.census_3mo_avg ?? "—"}
                     </td>
                     <td className="px-3 py-3 text-center tabular-nums text-slate-400">
-                      {s.mtd_avg.toFixed(1)}
+                      {s.mtd_avg === null ? "—" : s.mtd_avg.toFixed(1)}
                     </td>
                     <td className={`px-3 py-3 text-center font-semibold tabular-nums ${tone}`}>
-                      {pct(s.variance_pct)}
+                      {s.variance_pct === null ? "—" : pct(s.variance_pct)}
                     </td>
                     <td className={`px-3 py-3 text-center font-bold tabular-nums ${shiftsTone}`}>
-                      {s.open_shifts}
+                      {s.open_shifts ?? "—"}
                     </td>
                     <td className="px-3 py-3 text-xs text-slate-500 tabular-nums">
-                      {dateShort(s.contract_end)}
+                      {s.contract_end ? dateShort(s.contract_end) : "—"}
                     </td>
                     <td className="px-3 py-3 text-xs font-semibold text-slate-600 tabular-nums">
                       {usd(s.annual_subsidy_usd, true)}
                     </td>
                     <td className="px-3 py-3">
-                      {s.md_status === "VACANT" ? (
+                      {s.md_status === null ? (
+                        <span className="text-slate-400">—</span>
+                      ) : s.md_status === "VACANT" ? (
                         <Badge variant="bad" dot>
                           VACANT
                         </Badge>
@@ -222,10 +230,12 @@ export default async function OperationsPage() {
                   </td>
                   <td className="px-3 py-3 text-xs text-slate-500">{s.liaison ?? "—"}</td>
                   <td className="px-3 py-3 text-center text-base font-bold tabular-nums">
-                    {s.census_today}
+                    {s.census_today ?? "—"}
                   </td>
                   <td className="px-3 py-3">
-                    {s.md_status === "VACANT" ? (
+                    {s.md_status === null ? (
+                      <span className="text-slate-400">—</span>
+                    ) : s.md_status === "VACANT" ? (
                       <Badge variant="gray" dot>
                         No MD
                       </Badge>

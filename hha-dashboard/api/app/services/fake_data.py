@@ -90,34 +90,41 @@ FL_MTD_TARGET = 3_250_000
 # ----- Operations -----
 
 
-def _fake_site_row(s: SiteSpec, today: date) -> tuple[int, int]:
-    """Deterministic (census, open_shifts) fallback when no DB entry exists.
-
-    Local-only override (uncommitted): returns (0, 0) so the Operations Board
-    starts at zero and only reflects real census submissions from the portal
-    or the dashboard owner-form. Revert by restoring the body below to see
-    the demo-credible fakes from PR #30 again.
-    """
+def _fake_site_row(s: SiteSpec, today: date) -> tuple[int | None, int | None]:
+    """No-op stub. Returns `(None, None)` so sites without a real DailyEntry
+    today render as "—" on the Operations Board (the previous deterministic
+    demo numbers from PR #30 are intentionally gone — see Phase 1)."""
     _ = s, today
-    return 0, 0
+    return None, None
 
 
-def _build_site_row(s: SiteSpec, site_id: int, census: int, open_shifts: int) -> dict[str, Any]:
-    """Compose a SiteToday-shaped dict from a SiteSpec + today's numbers."""
-    variance_pct = ((census - s.avg_census) / s.avg_census * 100) if s.avg_census else 0
+def _build_site_row(
+    s: SiteSpec,
+    site_id: int,
+    census: int | None,
+    open_shifts: int | None,
+) -> dict[str, Any]:
+    """Compose a SiteToday-shaped dict.
+
+    Phase 1: only `id`, `name`, `state`, and `annual_subsidy_usd` come from
+    the spec. Every other field is `None` so the frontend renders "—". Real
+    operational fields (medical_director, liaison, MD status, 3-mo avg,
+    MTD, contract_end) will be populated from the masters tables once an
+    admin UI exists; until then they read empty by design.
+    """
     return {
         "id": site_id,
         "name": s.name,
         "state": s.state,
-        "medical_director": s.md_name,
-        "md_status": s.md_status,
-        "liaison": s.liaison,
+        "medical_director": None,
+        "md_status": None,
+        "liaison": None,
         "census_today": census,
-        "census_3mo_avg": s.avg_census,
-        "mtd_avg": s.mar_mtd,
-        "variance_pct": round(variance_pct, 1),
+        "census_3mo_avg": None,
+        "mtd_avg": None,
+        "variance_pct": None,
         "open_shifts": open_shifts,
-        "contract_end": s.contract_end.isoformat(),
+        "contract_end": None,
         "annual_subsidy_usd": s.subsidy_usd,
     }
 
@@ -217,11 +224,18 @@ async def get_operations_summary(
     rows = await get_sites_today(db, today)
     fl = [r for r in rows if r["state"] == "FL"]
     tx = [r for r in rows if r["state"] == "TX"]
-    total_fl_census = sum(r["census_today"] for r in fl)
-    total_tx_census = sum(r["census_today"] for r in tx)
-    total_fl_avg = sum(r["census_3mo_avg"] for r in fl)
-    below_avg = sum(1 for r in fl if r["census_today"] < r["census_3mo_avg"])
-    open_shifts_total = sum(r["open_shifts"] for r in rows)
+    # Phase 1: census/open_shifts/3-mo-avg can be None for un-entered sites —
+    # treat None as 0 for aggregate sums and skip the variance comparison.
+    total_fl_census = sum((r["census_today"] or 0) for r in fl)
+    total_tx_census = sum((r["census_today"] or 0) for r in tx)
+    total_fl_avg = sum((r["census_3mo_avg"] or 0) for r in fl)
+    below_avg = sum(
+        1
+        for r in fl
+        if r["census_3mo_avg"] is not None
+        and (r["census_today"] or 0) < r["census_3mo_avg"]
+    )
+    open_shifts_total = sum((r["open_shifts"] or 0) for r in rows)
 
     # Phase 1 census-portal integration: data-freshness fields. Counts only
     # REAL entries (from the DB) — fake_data fallbacks don't count as

@@ -17,14 +17,18 @@ export function SiteCensusForm({
   initialNotes,
 }: {
   siteId: number;
-  initialCensus: number;
-  initialOpenShifts: number;
+  initialCensus: number | null;
+  initialOpenShifts: number | null;
   initialNotes: string | null;
 }) {
   const router = useRouter();
   const api = useApiBrowser();
-  const [census, setCensus] = useState(String(initialCensus));
-  const [openShifts, setOpenShifts] = useState(String(initialOpenShifts));
+  // Phase 1: pre-fill empty when no entry exists yet (null), so the user
+  // sees a blank field instead of "0".
+  const [census, setCensus] = useState(initialCensus === null ? "" : String(initialCensus));
+  const [openShifts, setOpenShifts] = useState(
+    initialOpenShifts === null ? "" : String(initialOpenShifts),
+  );
   const [notes, setNotes] = useState(initialNotes ?? "");
   const [saving, setSaving] = useState(false);
 

@@ -30,14 +30,16 @@ export type SiteToday = {
   name: string;
   state: string;
   medical_director: string | null;
-  md_status: string;
+  md_status: string | null;
   liaison: string | null;
-  census_today: number;
-  census_3mo_avg: number;
-  mtd_avg: number;
-  variance_pct: number;
-  open_shifts: number;
-  contract_end: string;
+  /** null until a real DailyEntry lands for today (Phase 1). */
+  census_today: number | null;
+  /** null until masters / 3-mo history is wired. */
+  census_3mo_avg: number | null;
+  mtd_avg: number | null;
+  variance_pct: number | null;
+  open_shifts: number | null;
+  contract_end: string | null;
   annual_subsidy_usd: number;
 };
 
