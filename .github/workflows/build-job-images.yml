@@ -1,0 +1,156 @@
+name: build-job-images
+
+# Build + push the cron-job container images to Azure Container Registry.
+#
+# Audit ticket T5. Without this, the Container Apps Jobs declared in
+# infra/modules/containerjobs.bicep have no images to pull — first prod
+# deploy of the jobs would 404 on image pull.
+#
+# Triggered manually from the GitHub UI:
+#   gh workflow run build-job-images.yml -f environment=dev
+#   gh workflow run build-job-images.yml -f environment=prod -f image_tag=v1.2.3
+#
+# What gets built (3 of 6 jobs):
+#   - pg_backup     → acrhha{env}.azurecr.io/pg-backup:<tag>
+#   - alert_digest  → acrhha{env}.azurecr.io/alert-digest:<tag>
+#   - cred_scan     → acrhha{env}.azurecr.io/cred-scan:<tag>
+#
+# Skipped (vendor-blocked or scaffolding):
+#   - paycom_sync    (waiting on Paycom API access — F1)
+#   - ventra_ingest  (waiting on Ventra BAA + data shape — F1)
+#   - upload_ingest  (PARTIAL; pdf_extract.py SDK overload bug T8 first)
+#
+# Auth: OIDC federated identity. Same app reg as deploy-{dev,prod}.yml;
+# federated credential subject is `:environment:<environment>`. The
+# AcrPush role assignment in infra/modules/rbac.bicep gives this SP
+# permission to push to the registry.
+#
+# Repository variables required (the same set used by deploy-{dev,prod}.yml):
+#   AZURE_CLIENT_ID         — federated credential's app id
+#   AZURE_TENANT_ID         — HHA's M365 tenant id
+#   AZURE_SUBSCRIPTION_ID   — hha-{env} subscription id
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment — picks ACR + federated credential subject'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+      image_tag:
+        description: 'Image tag (default: short commit SHA). Use a semver tag like v1.2.3 for production releases.'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write    # required for OIDC token exchange
+
+concurrency:
+  # Per-environment lock — avoid two concurrent builds racing on the same
+  # ACR repo. Different environments can build in parallel.
+  group: build-job-images-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    name: build & push (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      # Gates the federated OIDC subject — the same `:environment:<env>`
+      # binding deploy-{dev,prod}.yml relies on. For prod this also
+      # surfaces required-reviewer approval if configured in repo settings.
+      name: ${{ inputs.environment }}
+
+    env:
+      ACR_NAME: acrhha${{ inputs.environment }}
+      ACR_LOGIN_SERVER: acrhha${{ inputs.environment }}.azurecr.io
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          # Operator-supplied tag wins; otherwise short SHA.
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            tag="${{ inputs.image_tag }}"
+          else
+            tag="$(git rev-parse --short HEAD)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "::notice::Building images with tag '$tag' for ${{ inputs.environment }}."
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login (docker auth)
+        run: |
+          # `az acr login` exchanges the federated AAD token for a Docker
+          # registry token and writes it into ~/.docker/config.json.
+          # Requires AcrPush role on the SP (granted by rbac.bicep).
+          az acr login -n "$ACR_NAME"
+
+      - name: Build & push pg_backup
+        working-directory: hha-dashboard/jobs/pg_backup
+        run: |
+          docker build \
+            -t "$ACR_LOGIN_SERVER/pg-backup:${{ steps.tag.outputs.tag }}" \
+            -t "$ACR_LOGIN_SERVER/pg-backup:latest" \
+            .
+          docker push "$ACR_LOGIN_SERVER/pg-backup:${{ steps.tag.outputs.tag }}"
+          docker push "$ACR_LOGIN_SERVER/pg-backup:latest"
+
+      - name: Build & push alert_digest
+        working-directory: hha-dashboard/jobs/alert_digest
+        run: |
+          docker build \
+            -t "$ACR_LOGIN_SERVER/alert-digest:${{ steps.tag.outputs.tag }}" \
+            -t "$ACR_LOGIN_SERVER/alert-digest:latest" \
+            .
+          docker push "$ACR_LOGIN_SERVER/alert-digest:${{ steps.tag.outputs.tag }}"
+          docker push "$ACR_LOGIN_SERVER/alert-digest:latest"
+
+      - name: Build & push cred_scan
+        working-directory: hha-dashboard/jobs/cred_scan
+        run: |
+          docker build \
+            -t "$ACR_LOGIN_SERVER/cred-scan:${{ steps.tag.outputs.tag }}" \
+            -t "$ACR_LOGIN_SERVER/cred-scan:latest" \
+            .
+          docker push "$ACR_LOGIN_SERVER/cred-scan:${{ steps.tag.outputs.tag }}"
+          docker push "$ACR_LOGIN_SERVER/cred-scan:latest"
+
+      - name: Print pushed image references
+        run: |
+          tag='${{ steps.tag.outputs.tag }}'
+          echo "::notice::Pushed images:"
+          echo "  $ACR_LOGIN_SERVER/pg-backup:$tag"
+          echo "  $ACR_LOGIN_SERVER/alert-digest:$tag"
+          echo "  $ACR_LOGIN_SERVER/cred-scan:$tag"
+          echo
+          echo "Next: bump image_tag in infra/env/${{ inputs.environment }}.bicepparam,"
+          echo "      then trigger the matching deploy-${{ inputs.environment }}.yml workflow."
+
+      - name: Verify images appear in ACR
+        run: |
+          # Cheap post-flight: confirm each repo got the new tag.
+          for image in pg-backup alert-digest cred-scan; do
+            tags=$(az acr repository show-tags -n "$ACR_NAME" --repository "$image" -o tsv || echo "")
+            if echo "$tags" | grep -qx '${{ steps.tag.outputs.tag }}'; then
+              echo "::notice::$image:${{ steps.tag.outputs.tag }} present in $ACR_NAME"
+            else
+              echo "::error::$image:${{ steps.tag.outputs.tag }} NOT found in $ACR_NAME after push. Aborting."
+              exit 1
+            fi
+          done

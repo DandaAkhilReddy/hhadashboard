@@ -127,6 +127,48 @@ az webapp restart -g $RG -n $WEB_APP
 visit). Treat as a credential — rotate after a known compromise, on a
 quarterly schedule otherwise.
 
+#### Phase 2.6 — Build & push cron job container images
+
+Container Apps Jobs created by `containerjobs.bicep` reference images at
+`acrhha{env}.azurecr.io/<image>:<tag>`. **First deploy uses the placeholder
+default** (Microsoft sample image) — every cron run will be a no-op until
+real images are pushed. Audit ticket T5.
+
+```bash
+# From a workstation with `gh` authenticated:
+gh workflow run build-job-images.yml -f environment=dev
+gh run watch  # or refresh GitHub Actions UI
+
+# Verify the 3 images landed:
+az acr repository list -n acrhha${ENV}
+# Expected: pg-backup, alert-digest, cred-scan
+```
+
+The workflow:
+- Logs into Azure via the same OIDC federated identity used by
+  `deploy-{env}.yml` (federated subject `:environment:${ENV}`).
+- Builds `pg_backup`, `alert_digest`, `cred_scan` Dockerfiles with both
+  the commit-SHA tag and `:latest`.
+- Pushes via `az acr login` (no admin user, no static credentials).
+- Verifies each tag landed in ACR before exiting.
+
+After the first successful push, **switch the bicepparam image params off
+the placeholder** by adding to `infra/env/${ENV}.bicepparam`:
+
+```bicep
+param pg_backup_image    = 'acrhha${ENV}.azurecr.io/pg-backup:latest'
+param alert_digest_image = 'acrhha${ENV}.azurecr.io/alert-digest:latest'
+param cred_scan_image    = 'acrhha${ENV}.azurecr.io/cred-scan:latest'
+```
+
+Then re-run `deploy-${ENV}.yml`. Container Apps Jobs auto-pull `:latest`
+on next scheduled run; for an immediate refresh, manually trigger the
+job via the Azure portal.
+
+**Image versioning:** for production releases, prefer SHA tags over
+`:latest` (reproducible, traceable). The workflow accepts an
+`image_tag` input for semver tagging (`v1.2.3`, `2026-04-27` etc.).
+
 ### Phase 3 — Seed application data
 
 ```bash
