@@ -61,7 +61,11 @@ export default async function OperationsPage() {
         <CardHeader
           title="Florida Sites — Daily Detail"
           owner="Crystal Anderson · owner_ops"
-          right={<Badge variant="blue" dot>{fl.length} sites</Badge>}
+          right={
+            <Badge variant="blue" dot>
+              {fl.length} sites
+            </Badge>
+          }
         />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -95,10 +99,7 @@ export default async function OperationsPage() {
                       ? "text-red-600"
                       : "text-amber-600";
                 return (
-                  <tr
-                    key={s.name}
-                    className="group transition-colors hover:bg-indigo-50/40"
-                  >
+                  <tr key={s.name} className="group transition-colors hover:bg-indigo-50/40">
                     <td className="px-3 py-3 font-semibold text-slate-900">
                       <Link
                         href={`/operations/${s.id}`}
@@ -123,7 +124,9 @@ export default async function OperationsPage() {
                       )}
                     </td>
                     <td className="px-3 py-3 text-xs text-slate-500">{s.liaison ?? "—"}</td>
-                    <td className={`px-3 py-3 text-center text-base font-bold tabular-nums ${tone}`}>
+                    <td
+                      className={`px-3 py-3 text-center text-base font-bold tabular-nums ${tone}`}
+                    >
                       {s.census_today}
                     </td>
                     <td className="px-3 py-3 text-center tabular-nums text-slate-500">
@@ -171,7 +174,11 @@ export default async function OperationsPage() {
         <CardHeader
           title="Texas Sites"
           owner="Dr. Veena Reddy · owner_clinical"
-          right={<Badge variant="blue" dot>{tx.length} sites</Badge>}
+          right={
+            <Badge variant="blue" dot>
+              {tx.length} sites
+            </Badge>
+          }
         />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -186,19 +193,14 @@ export default async function OperationsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {tx.map((s) => (
-                <tr
-                  key={s.name}
-                  className="group transition-colors hover:bg-indigo-50/40"
-                >
+                <tr key={s.name} className="group transition-colors hover:bg-indigo-50/40">
                   <td className="px-3 py-3 font-semibold text-slate-900">
                     <Link
                       href={`/operations/${s.id}`}
                       className="inline-flex items-center gap-1 transition-colors hover:text-indigo-600"
                     >
                       {s.name}
-                      <span className="opacity-0 transition-opacity group-hover:opacity-60">
-                        →
-                      </span>
+                      <span className="opacity-0 transition-opacity group-hover:opacity-60">→</span>
                     </Link>
                   </td>
                   <td className="px-3 py-3 text-xs text-slate-700">
