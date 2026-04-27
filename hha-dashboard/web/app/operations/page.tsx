@@ -17,12 +17,26 @@ export default async function OperationsPage() {
         title="Operations Board"
         subtitle="11 sites · FL (7) + TX (4) · Daily census, coverage, contracts"
         right={
-          <Link
-            href="/daily-census"
-            className="rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-slate-800"
-          >
-            + Enter Today&apos;s Data
-          </Link>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-slate-500">
+              {summary.facilities_reported > 0
+                ? `${summary.facilities_reported} of ${summary.facilities_reported + summary.facilities_missing} reported · last update ${
+                    summary.last_updated_at
+                      ? new Date(summary.last_updated_at).toLocaleTimeString(undefined, {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })
+                      : "—"
+                  }`
+                : "No census submitted yet today"}
+            </span>
+            <Link
+              href="/daily-census"
+              className="rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-slate-800"
+            >
+              + Enter Today&apos;s Data
+            </Link>
+          </div>
         }
       />
 

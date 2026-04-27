@@ -13,7 +13,7 @@ tests use only `census_session` cookies — never `Authorization: Dev <role>`.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -441,6 +441,291 @@ async def test_re_save_advances_entered_at_timestamp(seeded_credential) -> None:
             )
         )
         await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — date param, summary endpoint, session endpoint, simplified payload
+# ---------------------------------------------------------------------------
+
+
+async def test_session_endpoint_returns_email_with_valid_cookie(
+    seeded_credential,
+) -> None:
+    """GET /session is the lightweight 'is my cookie still good?' check the
+    portal UI uses on page load. 200 + email when valid, 401 otherwise."""
+    _ = seeded_credential
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        login_r = await client.post(
+            "/api/v1/census-portal/login",
+            json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+        )
+        cookie = login_r.cookies.get("census_session")
+        assert cookie is not None
+
+        r = await client.get(
+            "/api/v1/census-portal/session",
+            cookies={"census_session": cookie},
+        )
+    assert r.status_code == 200
+    assert r.json() == {"email": TEST_EMAIL}
+
+
+async def test_session_endpoint_without_cookie_returns_401() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        r = await client.get("/api/v1/census-portal/session")
+    assert r.status_code == 401
+
+
+async def test_sites_endpoint_accepts_date_query_param(seeded_credential) -> None:
+    """GET /sites?date=YYYY-MM-DD must scope the prefill to that date.
+    Default (no param) stays today, locked by the existing happy-path test."""
+    _ = seeded_credential
+    past_date = date(2026, 1, 5)
+
+    async with SessionLocal() as session:
+        existing_sites = (await session.execute(select(Site))).scalars().all()
+        if not existing_sites:
+            session.add(Site(name="Test Site", state="FL", status="ACTIVE"))
+            await session.commit()
+            existing_sites = (await session.execute(select(Site))).scalars().all()
+        site_id = existing_sites[0].id
+
+        await session.execute(
+            delete(DailyEntry).where(DailyEntry.entry_date == past_date)
+        )
+        session.add(
+            DailyEntry(
+                site_id=site_id,
+                entry_date=past_date,
+                census=42,
+                open_shifts=0,
+                entered_by_upn="census-portal@hhamedicine.com",
+                source="manual_portal",
+            )
+        )
+        await session.commit()
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            login_r = await client.post(
+                "/api/v1/census-portal/login",
+                json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+            )
+            cookie = login_r.cookies.get("census_session")
+            assert cookie is not None
+
+            r = await client.get(
+                f"/api/v1/census-portal/sites?date={past_date.isoformat()}",
+                cookies={"census_session": cookie},
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["entry_date"] == past_date.isoformat()
+        match = next((s for s in body["sites"] if s["site_id"] == site_id), None)
+        assert match is not None
+        assert match["census"] == 42
+        assert match["entered_at"] is not None
+    finally:
+        async with SessionLocal() as session:
+            await session.execute(
+                delete(DailyEntry).where(DailyEntry.entry_date == past_date)
+            )
+            await session.commit()
+
+
+async def test_summary_endpoint_returns_phase1_aggregate_fields(
+    seeded_credential,
+) -> None:
+    """GET /summary returns the four cards the portal entry page renders
+    (total / reported / missing / last_updated_at)."""
+    _ = seeded_credential
+    past_date = date(2026, 1, 6)
+
+    async with SessionLocal() as session:
+        existing_sites = (await session.execute(select(Site))).scalars().all()
+        if not existing_sites:
+            session.add(Site(name="Test Site", state="FL", status="ACTIVE"))
+            await session.commit()
+            existing_sites = (await session.execute(select(Site))).scalars().all()
+        site_id = existing_sites[0].id
+        await session.execute(
+            delete(DailyEntry).where(DailyEntry.entry_date == past_date)
+        )
+        session.add(
+            DailyEntry(
+                site_id=site_id,
+                entry_date=past_date,
+                census=88,
+                open_shifts=0,
+                entered_by_upn="census-portal@hhamedicine.com",
+                source="manual_portal",
+            )
+        )
+        await session.commit()
+        site_count = len(existing_sites)
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            login_r = await client.post(
+                "/api/v1/census-portal/login",
+                json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+            )
+            cookie = login_r.cookies.get("census_session")
+            assert cookie is not None
+
+            r = await client.get(
+                f"/api/v1/census-portal/summary?date={past_date.isoformat()}",
+                cookies={"census_session": cookie},
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["entry_date"] == past_date.isoformat()
+        assert body["total_census"] == 88
+        assert body["facilities_reported"] == 1
+        assert body["facilities_missing"] == max(0, site_count - 1)
+        assert body["last_updated_at"] is not None
+    finally:
+        async with SessionLocal() as session:
+            await session.execute(
+                delete(DailyEntry).where(DailyEntry.entry_date == past_date)
+            )
+            await session.commit()
+
+
+async def test_summary_endpoint_empty_date_returns_zero_total_and_null_timestamp(
+    seeded_credential,
+) -> None:
+    """For a date with zero entries, total_census == 0, facilities_reported == 0,
+    facilities_missing == site_count, last_updated_at is null. Locks the empty-
+    state path the portal UI relies on for the 'No census submitted' message."""
+    _ = seeded_credential
+    empty_date = date(2025, 12, 31)
+
+    async with SessionLocal() as session:
+        await session.execute(
+            delete(DailyEntry).where(DailyEntry.entry_date == empty_date)
+        )
+        await session.commit()
+        site_count = len((await session.execute(select(Site))).scalars().all())
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        login_r = await client.post(
+            "/api/v1/census-portal/login",
+            json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+        )
+        cookie = login_r.cookies.get("census_session")
+        assert cookie is not None
+
+        r = await client.get(
+            f"/api/v1/census-portal/summary?date={empty_date.isoformat()}",
+            cookies={"census_session": cookie},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total_census"] == 0
+    assert body["facilities_reported"] == 0
+    assert body["facilities_missing"] == site_count
+    assert body["last_updated_at"] is None
+
+
+async def test_save_accepts_phase1_payload_without_open_shifts(
+    seeded_credential,
+) -> None:
+    """Phase 1 portal sends `{site_id, census}` only — no `open_shifts`.
+    On UPDATE the portal must NOT overwrite a value previously written by
+    the dashboard owner-form. Locks the field-whitelist promise."""
+    _ = seeded_credential
+    past_date = date(2026, 1, 7)
+
+    async with SessionLocal() as session:
+        existing_sites = (await session.execute(select(Site))).scalars().all()
+        if not existing_sites:
+            session.add(Site(name="Test Site", state="FL", status="ACTIVE"))
+            await session.commit()
+            existing_sites = (await session.execute(select(Site))).scalars().all()
+        site_id = existing_sites[0].id
+        await session.execute(
+            delete(DailyEntry).where(
+                DailyEntry.site_id == site_id, DailyEntry.entry_date == past_date
+            )
+        )
+        # Seed an existing row with open_shifts=7 (simulating a prior dashboard write).
+        session.add(
+            DailyEntry(
+                site_id=site_id,
+                entry_date=past_date,
+                census=100,
+                open_shifts=7,
+                entered_by_upn="dashboard-user@hha.com",
+                source="manual",
+            )
+        )
+        await session.commit()
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            login_r = await client.post(
+                "/api/v1/census-portal/login",
+                json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+            )
+            cookie = login_r.cookies.get("census_session")
+            assert cookie is not None
+
+            r = await client.post(
+                "/api/v1/census-portal/daily-census",
+                cookies={"census_session": cookie},
+                json={
+                    "entry_date": past_date.isoformat(),
+                    "rows": [{"site_id": site_id, "census": 105}],  # NO open_shifts
+                },
+            )
+        assert r.status_code == 200, r.text
+
+        async with SessionLocal() as session:
+            row = (
+                await session.execute(
+                    select(DailyEntry).where(
+                        DailyEntry.site_id == site_id,
+                        DailyEntry.entry_date == past_date,
+                    )
+                )
+            ).scalar_one()
+            assert row.census == 105
+            # Critical: the 7 from the dashboard form must survive the portal
+            # update — the portal whitelist excludes open_shifts.
+            assert row.open_shifts == 7
+            assert row.source == "manual_portal"
+            assert row.entered_by_upn == "census-portal@hhamedicine.com"
+    finally:
+        async with SessionLocal() as session:
+            await session.execute(
+                delete(DailyEntry).where(
+                    DailyEntry.site_id == site_id, DailyEntry.entry_date == past_date
+                )
+            )
+            await session.commit()
+
+
+async def test_save_rejects_negative_census() -> None:
+    """Pydantic rejects negative census at the schema boundary (no DB)."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Without a cookie, auth runs before validation — locks the dep order.
+        r = await client.post(
+            "/api/v1/census-portal/daily-census",
+            json={
+                "entry_date": datetime.now(UTC).date().isoformat(),
+                "rows": [{"site_id": 1, "census": -1}],
+            },
+        )
+    assert r.status_code == 401
 
 
 async def test_logout_clears_session(seeded_credential) -> None:

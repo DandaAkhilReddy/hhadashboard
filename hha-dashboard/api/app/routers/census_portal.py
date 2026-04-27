@@ -17,10 +17,10 @@ See plan section "Slice A — Census-only entry portal" and Standing Fact F2.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -33,7 +33,9 @@ from ..schemas.census_portal import (
     PortalCensusBatchIn,
     PortalCensusOut,
     PortalLoginOut,
+    PortalSessionOut,
     PortalSiteOut,
+    PortalSummaryOut,
 )
 from ..services import audit as audit_service
 from ..services import census_auth
@@ -133,23 +135,27 @@ async def login(
 async def list_sites_with_today(
     db: DBDep,
     cred: CredentialDep,
+    target_date: Annotated[
+        date | None,
+        Query(alias="date", description="Defaults to today (UTC server clock)"),
+    ] = None,
 ) -> PortalLoginOut:
-    """Return the same prefill payload as /login so the entry page can render
-    after a refresh without re-authenticating.
+    """Return the prefill payload for `?date=` (defaults to today).
 
-    Returns ONLY facility names + today's already-entered numbers. No
-    operational data (no scorecards, finance, clinical, etc.) — keeps the
-    portal's read surface narrow and predictable.
+    Phase 1: returns ONLY facility names + that day's already-entered census
+    numbers (and the row's `updated_at` so the UI can render the locked
+    summary). No scorecards, finance, clinical — the portal's read surface
+    stays narrow and predictable.
     """
     _ = cred
+    the_date = target_date or datetime.now(UTC).date()
     sites = (await db.execute(select(Site).order_by(Site.name))).scalars().all()
-    today = datetime.now(UTC).date()
     existing = (
-        await db.execute(select(DailyEntry).where(DailyEntry.entry_date == today))
+        await db.execute(select(DailyEntry).where(DailyEntry.entry_date == the_date))
     ).scalars().all()
     by_site = {e.site_id: e for e in existing}
     return PortalLoginOut(
-        entry_date=today,
+        entry_date=the_date,
         sites=[
             PortalSiteOut(
                 site_id=s.id,
@@ -162,6 +168,57 @@ async def list_sites_with_today(
             for s in sites
         ],
     )
+
+
+@router.get("/summary", response_model=PortalSummaryOut)
+async def portal_summary(
+    db: DBDep,
+    cred: CredentialDep,
+    target_date: Annotated[
+        date | None,
+        Query(alias="date", description="Defaults to today (UTC server clock)"),
+    ] = None,
+) -> PortalSummaryOut:
+    """Aggregate cards for the portal entry page (Phase 1).
+
+    `total_census`        sum of census across all reported facilities for the date
+    `facilities_reported` count of sites with a non-null census today
+    `facilities_missing`  total active sites minus reported
+    `last_updated_at`     max(updated_at) across the date's rows; None if zero
+    """
+    _ = cred
+    the_date = target_date or datetime.now(UTC).date()
+
+    total_sites = (
+        await db.execute(select(func.count()).select_from(Site))
+    ).scalar_one()
+
+    rollup = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(DailyEntry.census), 0),
+                func.count(DailyEntry.id),
+                func.max(DailyEntry.updated_at),
+            ).where(DailyEntry.entry_date == the_date)
+        )
+    ).one()
+    total_census, reported, last_updated = rollup
+
+    return PortalSummaryOut(
+        entry_date=the_date,
+        total_census=int(total_census or 0),
+        facilities_reported=int(reported or 0),
+        facilities_missing=max(0, int(total_sites) - int(reported or 0)),
+        last_updated_at=last_updated,
+    )
+
+
+@router.get("/session", response_model=PortalSessionOut)
+async def portal_session(cred: CredentialDep) -> PortalSessionOut:
+    """Lightweight session check. 401 (via dependency) when missing/invalid;
+    200 + portal email otherwise. Lets the UI verify a session without
+    pulling the full /sites list."""
+    return PortalSessionOut(email=cred.email)
 
 
 @router.post("/logout")
@@ -207,13 +264,19 @@ async def save_daily_census(
         )
 
     for row in batch.rows:
+        # Phase 1 portal whitelist: write only census + audit metadata. The
+        # `open_shifts` column stays in the table (NOT NULL DEFAULT 0) but is
+        # never set by the portal — INSERT relies on the column default,
+        # UPDATE leaves any existing value alone (e.g. if the dashboard
+        # owner-form had previously written one). `notes` and `pdf_sha256`
+        # are likewise untouched.
         stmt = (
             pg_insert(DailyEntry)
             .values(
                 site_id=row.site_id,
                 entry_date=batch.entry_date,
                 census=row.census,
-                open_shifts=row.open_shifts,
+                # open_shifts: omitted — falls to server-side default 0
                 entered_by_upn=PORTAL_UPN,
                 source=PORTAL_SOURCE,
                 pdf_sha256=None,
@@ -223,14 +286,10 @@ async def save_daily_census(
                 index_elements=["site_id", "entry_date"],
                 set_={
                     "census": row.census,
-                    "open_shifts": row.open_shifts,
+                    # open_shifts intentionally NOT in set_ — preserves
+                    # whatever the dashboard owner-form wrote, if anything.
                     "entered_by_upn": PORTAL_UPN,
                     "source": PORTAL_SOURCE,
-                    # Use the DB clock (func.now()) for consistency with the
-                    # INSERT path's server_default=func.now() — Python's
-                    # datetime.now(UTC) can drift behind the DB clock and
-                    # produce a re-save timestamp older than the original
-                    # INSERT, breaking "entered HH:MM" displays in the portal.
                     "updated_at": func.now(),
                 },
             )

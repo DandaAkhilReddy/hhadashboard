@@ -70,16 +70,24 @@ async def test_get_sites_today_prefers_db_value() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_sites_today_falls_back_when_no_entry() -> None:
-    """Sites without a DailyEntry row still render, using the fake value."""
+async def test_get_sites_today_falls_back_to_zero_when_no_entry() -> None:
+    """Sites without a DailyEntry row render with census=0 (Phase 1 contract).
+
+    The pre-Phase-1 deterministic fake fallback was reverted to (0, 0) so the
+    Operations Board only reflects real census submissions. See
+    `_fake_site_row` in app/services/fake_data.py.
+    """
     db = _mock_db(_DEFAULT_SITES, [("Westside Regional", 198, 3)])
     today = date(2026, 4, 23)
 
     rows = await fake_data.get_sites_today(db=db, today=today)
     by_name = {r["name"]: r for r in rows}
 
-    assert by_name["Woodmont Hospital"]["census_today"] > 0
-    assert by_name["Woodmont Hospital"]["census_today"] != 198
+    # Westside has a real entry — keeps its DB value.
+    assert by_name["Westside Regional"]["census_today"] == 198
+    # Woodmont has no entry — now zero, not a deterministic fake.
+    assert by_name["Woodmont Hospital"]["census_today"] == 0
+    assert by_name["Woodmont Hospital"]["open_shifts"] == 0
 
 
 @pytest.mark.asyncio

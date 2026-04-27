@@ -40,11 +40,18 @@ class PortalLoginOut(BaseModel):
 
 
 class PortalCensusRow(BaseModel):
-    """One row of the bulk save."""
+    """One row of the bulk save.
+
+    Phase 1 collects ONLY `(site_id, census)` from the portal. The DB column
+    `open_shifts` (NOT NULL DEFAULT 0 on `entries.daily_entries`) stays in
+    the table for compatibility with the dashboard owner-form; the portal
+    does not write it. The router defaults it to 0 on insert, leaves it
+    unchanged on update. See `docs/PHASE_1_CENSUS_PORTAL.md` for the
+    Phase 1 field whitelist.
+    """
 
     site_id: int
     census: int = Field(..., ge=0, le=2000)
-    open_shifts: int = Field(default=0, ge=0, le=50)
 
 
 class PortalCensusBatchIn(BaseModel):
@@ -80,3 +87,29 @@ class PortalCensusOut(BaseModel):
     open_shifts: int
     source: str
     entered_at: datetime
+
+
+class PortalSummaryOut(BaseModel):
+    """Aggregate summary cards for the portal entry page.
+
+    Phase 1: total / reported / missing / last_updated_at, scoped to the
+    requested `entry_date`. Read-only; portal cannot pivot this into any
+    other operational data.
+    """
+
+    entry_date: date
+    total_census: int
+    facilities_reported: int
+    facilities_missing: int
+    last_updated_at: datetime | None
+
+
+class PortalSessionOut(BaseModel):
+    """Lightweight session-check response.
+
+    The `cookie required` dependency 401s on missing/invalid; this endpoint
+    returns 200 + the portal email so the UI can verify a session without
+    fetching the full /sites payload.
+    """
+
+    email: str
