@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
 
+import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -16,6 +17,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from .core.logging import configure_logging, get_logger
+from .core.telemetry import setup_telemetry
 from .deps import engine, get_current_user
 from .routers import (
     alerts,
@@ -36,7 +38,7 @@ log = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(app_: FastAPI):
     configure_logging(settings.log_level)
     # Audit row writing is handled by Postgres triggers (migration 0007), not
     # an ORM listener. The middleware below sets the UPN contextvar; the
@@ -61,6 +63,10 @@ async def lifespan(_app: FastAPI):
             "so CORS allows the web App Service hostname."
         )
         raise RuntimeError(msg)
+
+    # OpenTelemetry / App Insights — no-op when settings.telemetry_configured
+    # is False. Audit ticket T6.
+    setup_telemetry(app_)
 
     log.info("api.startup", env=settings.env, log_level=settings.log_level)
     yield
@@ -110,7 +116,11 @@ app.add_middleware(
 
 @app.exception_handler(HTTPException)
 async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
+    correlation_id = (
+        structlog.contextvars.get_contextvars().get("request_id")
+        or request.headers.get("x-correlation-id")
+        or str(uuid4())
+    )
     log.info(
         "http_exception",
         status_code=exc.status_code,
@@ -134,7 +144,11 @@ async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONR
 async def _validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
+    correlation_id = (
+        structlog.contextvars.get_contextvars().get("request_id")
+        or request.headers.get("x-correlation-id")
+        or str(uuid4())
+    )
     # Pydantic v2 validation errors can carry non-JSON-serializable context
     # (e.g., a ValueError instance in `ctx`). `jsonable_encoder` walks the
     # structure and stringifies anything it can't serialize directly.
@@ -161,7 +175,11 @@ async def _unhandled_exception_handler(
     """Catch-all. Logs the full exception structurally; returns a sanitized
     body so internal details (DB connection strings, file paths, etc.)
     never reach the client."""
-    correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
+    correlation_id = (
+        structlog.contextvars.get_contextvars().get("request_id")
+        or request.headers.get("x-correlation-id")
+        or str(uuid4())
+    )
     log.error(
         "unhandled_exception",
         path=request.url.path,
@@ -178,6 +196,37 @@ async def _unhandled_exception_handler(
         },
         headers={"x-correlation-id": correlation_id},
     )
+
+
+# ---------- Request-id middleware ----------
+#
+# Bind a per-request correlation id to structlog contextvars so every log
+# record in the request scope is automatically tagged. The id flows
+# through to:
+#   - Every structlog record (via `merge_contextvars` in core/logging.py)
+#   - Every error response body (`correlation_id` field, read by exception
+#     handlers above)
+#   - The `X-Correlation-Id` response header (echoed even on success so
+#     the caller can re-use the id for follow-up support tickets / cross-
+#     service tracing)
+#
+# Honors caller-supplied `X-Correlation-Id` header so an upstream gateway
+# / smoke-test script can pin a known id end-to-end.
+#
+# Audit ticket T6.
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("x-correlation-id") or str(uuid4())
+    # Fresh request: clear any contextvars left by a prior coroutine on
+    # this worker (defensive; the ContextVar should already be empty).
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+    try:
+        response = await call_next(request)
+    finally:
+        structlog.contextvars.clear_contextvars()
+    response.headers["x-correlation-id"] = request_id
+    return response
 
 
 # ---------- UPN contextvar middleware ----------
