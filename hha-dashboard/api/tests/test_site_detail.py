@@ -50,14 +50,21 @@ async def test_get_site_today_returns_db_value_when_entry_exists() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_site_today_falls_back_to_fake_when_no_entry() -> None:
+async def test_get_site_today_falls_back_to_zero_when_no_entry() -> None:
+    """Phase 1 contract: a site with no DailyEntry today renders census=0
+    (and open_shifts=0). The deterministic fake-data fallback from PR #30
+    was reverted in `_fake_site_row` so the dashboard only reflects real
+    census submissions."""
     db = _mock_db_for_get_site_today(_mock_site(2, "Woodmont Hospital", "FL"), None)
 
     row = await fake_data.get_site_today(db, site_id=2, today=date(2026, 4, 25))
 
     assert row is not None
     assert row["name"] == "Woodmont Hospital"
-    assert row["census_today"] > 0  # deterministic fake fallback
+    assert row["census_today"] == 0
+    assert row["open_shifts"] == 0
+    # Static spec fields (medical director, status, etc.) still render — only
+    # the census + open_shifts numbers are zeroed.
     assert row["medical_director"] == "Dr. Franklyn"
 
 

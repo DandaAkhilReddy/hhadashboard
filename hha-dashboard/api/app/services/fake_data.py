@@ -91,23 +91,15 @@ FL_MTD_TARGET = 3_250_000
 
 
 def _fake_site_row(s: SiteSpec, today: date) -> tuple[int, int]:
-    """Deterministic (census, open_shifts) fallback when no DB entry exists."""
-    if s.state == "FL":
-        offset = _noise(("census", s.name, today.isoformat()), 0.15)
-        census = round(s.avg_census * (1 + offset) * 0.85)  # bias slightly low
-        # Hand-pinned per UI_MOCKUP_v5.html pain points
-        if s.name == "Westside Regional":
-            open_shifts = 3
-        elif s.name == "Palms West Hospital":
-            open_shifts = 2
-        elif s.name in ("University Hospital", "Jackson Memorial"):
-            open_shifts = 1
-        else:
-            open_shifts = 0
-    else:
-        census = s.avg_census + int(_noise(("census", s.name, today.isoformat()), 2))
-        open_shifts = 0
-    return census, open_shifts
+    """Deterministic (census, open_shifts) fallback when no DB entry exists.
+
+    Local-only override (uncommitted): returns (0, 0) so the Operations Board
+    starts at zero and only reflects real census submissions from the portal
+    or the dashboard owner-form. Revert by restoring the body below to see
+    the demo-credible fakes from PR #30 again.
+    """
+    _ = s, today
+    return 0, 0
 
 
 def _build_site_row(s: SiteSpec, site_id: int, census: int, open_shifts: int) -> dict[str, Any]:
