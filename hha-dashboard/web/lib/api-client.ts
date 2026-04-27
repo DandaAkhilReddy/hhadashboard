@@ -168,6 +168,10 @@ export type OperationsSummary = {
   open_shifts_total: number;
   fl_site_count: number;
   tx_site_count: number;
+  // Phase 1 census-portal integration fields:
+  facilities_reported: number;
+  facilities_missing: number;
+  last_updated_at: string | null;
 };
 
 export type FinanceToday = {

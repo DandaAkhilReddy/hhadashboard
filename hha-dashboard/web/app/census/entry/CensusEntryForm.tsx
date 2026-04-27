@@ -8,19 +8,26 @@ export interface PortalSite {
   site_name: string;
   state: string;
   census: number | null;
+  /** Phase 1 portal does not display open_shifts; the field arrives in the
+   * payload for compatibility with the existing API shape but is unused
+   * in this form. */
   open_shifts: number;
-  /**
-   * ISO-8601 timestamp of the row's last save today, or null if the row
-   * has never been entered. Drives the locked-with-Edit row state below:
-   * non-null → row renders as `✓ N · entered HH:MM · [Edit]`;
-   * null → row renders as editable inputs with a [Save] button.
-   */
+  /** ISO-8601 of the row's last save for this date, null if never entered. */
   entered_at: string | null;
+}
+
+export interface PortalSummary {
+  entry_date: string;
+  total_census: number;
+  facilities_reported: number;
+  facilities_missing: number;
+  last_updated_at: string | null;
 }
 
 interface CensusEntryFormProps {
   initialDate: string;
   initialSites: PortalSite[];
+  initialSummary: PortalSummary;
   apiBase: string;
 }
 
@@ -30,21 +37,13 @@ interface RowState {
   state: string;
   /** Live editable value while in editMode. */
   census: string;
-  open_shifts: string;
-  /** Last-persisted census (null if never saved today). Used to render the
-   * locked summary and to revert from a Cancel. */
+  /** Last-persisted census (null if never entered for this date). */
   savedCensus: number | null;
-  savedOpenShifts: number;
   /** Last-saved timestamp from the server. Drives the lock state. */
   enteredAt: string | null;
-  /** Per-row edit toggle. True for never-entered rows; false for already-saved
-   * rows (until the user clicks Edit). */
+  /** Per-row edit toggle. True for never-entered rows. */
   editMode: boolean;
-  /** Per-row save state — keeps each save independent so a slow Westside
-   * save doesn't grey-out Woodmont's Save button. */
   saving: boolean;
-  /** Per-row last error or save success label, cleared when the user starts
-   * editing again. */
   feedback: { kind: "ok" | "error"; message: string } | null;
 }
 
@@ -54,11 +53,8 @@ function toRow(site: PortalSite): RowState {
     site_name: site.site_name,
     state: site.state,
     census: site.census === null ? "" : String(site.census),
-    open_shifts: String(site.open_shifts),
     savedCensus: site.census,
-    savedOpenShifts: site.open_shifts,
     enteredAt: site.entered_at,
-    // Already-entered rows start LOCKED. Never-entered rows start EDITABLE.
     editMode: site.entered_at === null,
     saving: false,
     feedback: null,
@@ -67,22 +63,65 @@ function toRow(site: PortalSite): RowState {
 
 function formatTime(iso: string | null): string {
   if (iso === null) return "";
-  // The backend emits UTC; the user reads local time. toLocaleTimeString
-  // handles the conversion automatically.
   const d = new Date(iso);
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEntryFormProps) {
+function formatDateTime(iso: string | null): string {
+  if (iso === null) return "—";
+  const d = new Date(iso);
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
+}
+
+function todayIso(): string {
+  // Local-time YYYY-MM-DD so the date picker default matches the user's clock.
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+export function CensusEntryForm({
+  initialDate,
+  initialSites,
+  initialSummary,
+  apiBase,
+}: CensusEntryFormProps) {
   const router = useRouter();
   const [rows, setRows] = useState<RowState[]>(() => initialSites.map(toRow));
+  // Server renders the summary for the initial date; per-row Save responses
+  // refresh the affected row, and `router.refresh()` re-fetches on next nav.
+  // We keep a local copy so totals update inline without waiting on the round-trip.
+  const [summary, setSummary] = useState(initialSummary);
 
   function patchRow(siteId: number, patch: Partial<RowState>): void {
     setRows((current) => current.map((r) => (r.site_id === siteId ? { ...r, ...patch } : r)));
   }
 
+  function recomputeSummary(updated: RowState[]): typeof summary {
+    const reported = updated.filter((r) => r.savedCensus !== null);
+    const total = reported.reduce((sum, r) => sum + (r.savedCensus ?? 0), 0);
+    const isos = reported.map((r) => r.enteredAt).filter((s): s is string => s !== null);
+    const lastUpdated =
+      isos.length === 0 ? null : isos.reduce((max, cur) => (cur > max ? cur : max), isos[0]);
+    return {
+      entry_date: summary.entry_date,
+      total_census: total,
+      facilities_reported: reported.length,
+      facilities_missing: Math.max(0, updated.length - reported.length),
+      last_updated_at: lastUpdated,
+    };
+  }
+
+  function onDateChange(newDate: string): void {
+    router.push(`/census/entry?date=${encodeURIComponent(newDate)}`);
+  }
+
   function onEdit(siteId: number): void {
-    // Snapshot current saved values into the editable fields and unlock.
     setRows((current) =>
       current.map((r) =>
         r.site_id === siteId
@@ -90,10 +129,7 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
               ...r,
               editMode: true,
               feedback: null,
-              // Reset the input to the persisted value (in case a half-typed
-              // edit was abandoned earlier in this session).
               census: r.savedCensus === null ? "" : String(r.savedCensus),
-              open_shifts: String(r.savedOpenShifts),
             }
           : r,
       ),
@@ -101,7 +137,6 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
   }
 
   function onCancel(siteId: number): void {
-    // Revert inputs to last-saved values and re-lock.
     setRows((current) =>
       current.map((r) =>
         r.site_id === siteId
@@ -110,7 +145,6 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
               editMode: false,
               feedback: null,
               census: r.savedCensus === null ? "" : String(r.savedCensus),
-              open_shifts: String(r.savedOpenShifts),
             }
           : r,
       ),
@@ -132,7 +166,6 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
       });
       return;
     }
-    const openShiftsNum = Number.parseInt(row.open_shifts || "0", 10);
 
     patchRow(row.site_id, { saving: true, feedback: null });
 
@@ -143,13 +176,7 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           entry_date: initialDate,
-          rows: [
-            {
-              site_id: row.site_id,
-              census: censusNum,
-              open_shifts: openShiftsNum,
-            },
-          ],
+          rows: [{ site_id: row.site_id, census: censusNum }],
         }),
       });
 
@@ -170,7 +197,6 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
       const body = (await res.json()) as Array<{
         site_id: number;
         census: number;
-        open_shifts: number;
         entered_at: string;
       }>;
       const saved = body.find((r) => r.site_id === row.site_id);
@@ -185,18 +211,24 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
         return;
       }
 
-      patchRow(row.site_id, {
-        saving: false,
-        editMode: false,
-        savedCensus: saved.census,
-        savedOpenShifts: saved.open_shifts,
-        enteredAt: saved.entered_at,
-        census: String(saved.census),
-        open_shifts: String(saved.open_shifts),
-        feedback: { kind: "ok", message: `Saved at ${formatTime(saved.entered_at)}.` },
-      });
-      // Keep the dashboard read-side fresh on a snappy refresh after multiple
-      // edits — cheap because Next streams diffs.
+      const next = rows.map((r) =>
+        r.site_id === row.site_id
+          ? {
+              ...r,
+              saving: false,
+              editMode: false,
+              savedCensus: saved.census,
+              enteredAt: saved.entered_at,
+              census: String(saved.census),
+              feedback: {
+                kind: "ok" as const,
+                message: `Saved at ${formatTime(saved.entered_at)}.`,
+              },
+            }
+          : r,
+      );
+      setRows(next);
+      setSummary(recomputeSummary(next));
       router.refresh();
     } catch (err) {
       patchRow(row.site_id, {
@@ -217,15 +249,61 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
     router.replace("/census/login");
   }
 
+  const isToday = initialDate === todayIso();
+  const allMissing = summary.facilities_reported === 0;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            Date
+            <input
+              type="date"
+              value={initialDate}
+              max={todayIso()}
+              onChange={(e) => onDateChange(e.target.value)}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm"
+            />
+          </label>
+          <span className="text-xs text-slate-500">
+            {isToday ? "Today's census" : `Census for ${initialDate}`}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <SummaryCard
+            label="Total Census"
+            value={String(summary.total_census)}
+            tone={summary.total_census > 0 ? "ok" : "muted"}
+          />
+          <SummaryCard
+            label="Facilities Reported"
+            value={`${summary.facilities_reported} / ${summary.facilities_reported + summary.facilities_missing}`}
+            tone="ok"
+          />
+          <SummaryCard
+            label="Facilities Missing"
+            value={String(summary.facilities_missing)}
+            tone={summary.facilities_missing === 0 ? "ok" : "warn"}
+          />
+          <SummaryCard label="Last Updated" value={formatDateTime(summary.last_updated_at)} />
+        </div>
+      </div>
+
+      {allMissing ? (
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-6 text-center text-sm text-slate-500">
+          No census submitted for this date yet.
+        </div>
+      ) : null}
+
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-600">
             <tr>
               <th className="px-4 py-2 text-left font-medium">Facility</th>
               <th className="w-16 px-4 py-2 text-left font-medium">State</th>
-              <th className="px-4 py-2 text-left font-medium">Today</th>
+              <th className="px-4 py-2 text-left font-medium">Census</th>
               <th className="w-44 px-4 py-2 text-right font-medium">Action</th>
             </tr>
           </thead>
@@ -235,73 +313,51 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
               return (
                 <tr
                   key={row.site_id}
-                  className={`border-t border-slate-100 ${locked ? "bg-emerald-50/30" : ""}`}
+                  className={`border-t border-slate-100 ${
+                    locked && row.savedCensus !== null ? "bg-emerald-50/30" : ""
+                  }`}
                 >
                   <td className="px-4 py-3 font-medium text-slate-900">{row.site_name}</td>
                   <td className="px-4 py-3 text-slate-500">{row.state}</td>
 
                   {locked ? (
                     <td className="px-4 py-3">
-                      <div className="flex items-baseline gap-3 text-slate-700">
-                        <span
-                          className="inline-flex items-center gap-1 text-emerald-700"
-                          aria-label="Saved for today"
-                        >
-                          <span aria-hidden>✓</span>
-                          <span className="font-semibold tabular-nums">
-                            {row.savedCensus} census
+                      {row.savedCensus !== null ? (
+                        <div className="flex items-baseline gap-3 text-slate-700">
+                          <span
+                            className="inline-flex items-center gap-1 text-emerald-700"
+                            aria-label="Saved for this date"
+                          >
+                            <span aria-hidden>✓</span>
+                            <span className="font-semibold tabular-nums">{row.savedCensus}</span>
                           </span>
-                        </span>
-                        <span className="text-slate-400">·</span>
-                        <span className="tabular-nums text-slate-600">
-                          {row.savedOpenShifts} open shifts
-                        </span>
-                        <span className="text-slate-400">·</span>
-                        <span className="text-xs text-slate-500">
-                          entered {formatTime(row.enteredAt)}
-                        </span>
-                      </div>
+                          <span className="text-slate-400">·</span>
+                          <span className="text-xs text-slate-500">
+                            entered {formatTime(row.enteredAt)}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs italic text-slate-400">not entered yet</span>
+                      )}
                       {row.feedback?.kind === "ok" ? (
                         <div className="mt-1 text-xs text-emerald-700">{row.feedback.message}</div>
                       ) : null}
                     </td>
                   ) : (
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="flex items-center gap-1 text-xs text-slate-600">
-                          Census
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            min={0}
-                            max={2000}
-                            value={row.census}
-                            onChange={(e) =>
-                              patchRow(row.site_id, { census: e.target.value, feedback: null })
-                            }
-                            aria-label={`${row.site_name} census`}
-                            className="w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                        </label>
-                        <label className="flex items-center gap-1 text-xs text-slate-600">
-                          Open shifts
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            min={0}
-                            max={50}
-                            value={row.open_shifts}
-                            onChange={(e) =>
-                              patchRow(row.site_id, {
-                                open_shifts: e.target.value,
-                                feedback: null,
-                              })
-                            }
-                            aria-label={`${row.site_name} open shifts`}
-                            className="w-20 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                        </label>
-                      </div>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={2000}
+                        value={row.census}
+                        onChange={(e) =>
+                          patchRow(row.site_id, { census: e.target.value, feedback: null })
+                        }
+                        aria-label={`${row.site_name} census`}
+                        className="w-28 rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        placeholder="0"
+                      />
                       {row.feedback?.kind === "error" ? (
                         <div className="mt-1 text-xs text-red-700">{row.feedback.message}</div>
                       ) : null}
@@ -315,7 +371,7 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
                         onClick={() => onEdit(row.site_id)}
                         className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-indigo-400 hover:text-indigo-700"
                       >
-                        Edit
+                        {row.savedCensus === null ? "Enter" : "Edit"}
                       </button>
                     ) : (
                       <div className="flex justify-end gap-2">
@@ -359,6 +415,31 @@ export function CensusEntryForm({ initialDate, initialSites, apiBase }: CensusEn
           Each row saves independently. Already-saved rows show in green.
         </span>
       </div>
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "ok" | "warn" | "muted" | "neutral";
+}) {
+  const accent =
+    tone === "ok"
+      ? "text-emerald-700"
+      : tone === "warn"
+        ? "text-amber-700"
+        : tone === "muted"
+          ? "text-slate-400"
+          : "text-slate-900";
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</div>
+      <div className={`mt-1 text-xl font-bold tabular-nums ${accent}`}>{value}</div>
     </div>
   );
 }

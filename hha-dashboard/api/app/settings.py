@@ -127,6 +127,14 @@ class Settings(BaseSettings):
             and self.paycom_client_secret
         )
 
+    # ---------- Census portal (Phase 1) ----------
+    # Email used for the single shared census-portal credential. Stored as
+    # a configurable default so the seed script (`scripts/seed_census_credential.py`)
+    # can pick it up when --email isn't passed. The password is NEVER an env var:
+    # it lives only as an argon2id hash in `auth.census_credentials`, seeded by
+    # the script. See docs/PHASE_1_CENSUS_PORTAL.md.
+    census_portal_email: str = "portal@hhamedicine.com"
+
     # ---------- Application Insights / OpenTelemetry (T6) ----------
     # When set, app/core/telemetry.py wires Azure Monitor OTel + FastAPI
     # auto-instrumentation at lifespan startup. When empty, telemetry is a

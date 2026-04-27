@@ -30,6 +30,10 @@ class OperationsSummary(BaseModel):
     open_shifts_total: int
     fl_site_count: int
     tx_site_count: int
+    # Phase 1 census-portal integration: how fresh is today's data?
+    facilities_reported: int
+    facilities_missing: int
+    last_updated_at: datetime | None
 
 
 class DailyEntryHistoryRow(BaseModel):

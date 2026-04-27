@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # ----- Deterministic helpers -----
@@ -230,6 +230,29 @@ async def get_operations_summary(
     total_fl_avg = sum(r["census_3mo_avg"] for r in fl)
     below_avg = sum(1 for r in fl if r["census_today"] < r["census_3mo_avg"])
     open_shifts_total = sum(r["open_shifts"] for r in rows)
+
+    # Phase 1 census-portal integration: data-freshness fields. Counts only
+    # REAL entries (from the DB) — fake_data fallbacks don't count as
+    # "reported" because they're not user-submitted.
+    facilities_reported = 0
+    facilities_missing = max(0, len(rows))
+    last_updated_at: datetime | None = None
+    if db is not None:
+        from ..models.entries import DailyEntry
+
+        rollup = (
+            await db.execute(
+                select(
+                    func.count(DailyEntry.id),
+                    func.max(DailyEntry.updated_at),
+                ).where(DailyEntry.entry_date == today)
+            )
+        ).one()
+        reported_count, max_updated = rollup
+        facilities_reported = int(reported_count or 0)
+        facilities_missing = max(0, len(rows) - facilities_reported)
+        last_updated_at = max_updated
+
     return {
         "total_fl_census": total_fl_census,
         "total_tx_census": total_tx_census,
@@ -239,6 +262,9 @@ async def get_operations_summary(
         "open_shifts_total": open_shifts_total,
         "fl_site_count": len(fl),
         "tx_site_count": len(tx),
+        "facilities_reported": facilities_reported,
+        "facilities_missing": facilities_missing,
+        "last_updated_at": last_updated_at,
     }
 
 
