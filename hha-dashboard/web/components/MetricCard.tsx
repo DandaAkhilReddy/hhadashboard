@@ -5,6 +5,7 @@ type MetricCardProps = {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
+  source?: ReactNode;
   tone?: "neutral" | "good" | "warn" | "bad";
   accent?: boolean;
 };
@@ -16,7 +17,14 @@ const TONE_CLASS = {
   bad: "text-red-600",
 } as const;
 
-export function MetricCard({ label, value, sub, tone = "neutral", accent }: MetricCardProps) {
+export function MetricCard({
+  label,
+  value,
+  sub,
+  source,
+  tone = "neutral",
+  accent,
+}: MetricCardProps) {
   return (
     <div
       className={cn(
@@ -24,7 +32,12 @@ export function MetricCard({ label, value, sub, tone = "neutral", accent }: Metr
         accent ? "border-indigo-200 bg-indigo-50" : "border-slate-200 bg-white",
       )}
     >
-      <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">{label}</div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+          {label}
+        </div>
+        {source ? <div className="shrink-0">{source}</div> : null}
+      </div>
       <div className={cn("mt-1 text-3xl font-bold tabular-nums", TONE_CLASS[tone])}>{value}</div>
       {sub ? <div className="mt-1 text-xs text-slate-500">{sub}</div> : null}
     </div>

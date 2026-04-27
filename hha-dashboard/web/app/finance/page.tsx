@@ -46,6 +46,7 @@ export default async function FinancePage() {
         <MetricCard
           label="FL Daily Collections"
           value={usd(today.fl_daily_actual)}
+          source={<SourceTag source={today.fl_source_system} />}
           sub={
             <span className="flex items-center gap-1 font-semibold text-red-600">
               ▼ {usd(Math.abs(today.fl_daily_delta))} below {usd(today.fl_daily_target, true)}
@@ -56,6 +57,7 @@ export default async function FinancePage() {
         <MetricCard
           label="TX Daily Collections"
           value={usd(today.tx_daily_actual)}
+          source={<SourceTag source={today.tx_source_system} />}
           sub={
             <span className="font-semibold text-emerald-600">
               ▲ {usd(Math.abs(today.tx_daily_delta))} above {usd(today.tx_daily_target, true)}
@@ -66,12 +68,14 @@ export default async function FinancePage() {
         <MetricCard
           label="FL MTD"
           value={usd(today.fl_mtd_actual, true)}
+          source={<SourceTag source={today.fl_source_system} />}
           sub={`vs ${usd(today.fl_mtd_target, true)} target · ${pct(today.fl_mtd_pct)}`}
           tone="warn"
         />
         <MetricCard
           label="Ventra Fee (5%)"
           value={usd(today.ventra_fee_mtd, true)}
+          source={<SourceTag source={today.fl_source_system} />}
           sub="MTD · auto-computed from FL collections"
         />
       </div>
@@ -105,21 +109,47 @@ export default async function FinancePage() {
 
         <Card>
           <CardHeader title="Top-line Finance Metrics" />
-          <Row label="Days in A/R — Florida" sub={`Target <${kpis.days_in_ar_target}`} tone="good">
+          <Row
+            label="Days in A/R — Florida"
+            sub={`Target <${kpis.days_in_ar_target}`}
+            source={<SourceTag source={today.fl_source_system} />}
+            tone="good"
+          >
             {kpis.fl_days_in_ar}
           </Row>
-          <Row label="Days in A/R — Texas" sub={`Target <${kpis.days_in_ar_target}`} tone="good">
+          <Row
+            label="Days in A/R — Texas"
+            sub={`Target <${kpis.days_in_ar_target}`}
+            source={<SourceTag source={today.tx_source_system} />}
+            tone="good"
+          >
             {kpis.tx_days_in_ar}
           </Row>
-          <Row label="Net Collection Rate — FL" sub={kpis.ncr_billed_at} tone="warn">
+          <Row
+            label="Net Collection Rate — FL"
+            sub={kpis.ncr_billed_at}
+            source={<SourceTag source={today.fl_source_system} />}
+            tone="warn"
+          >
             {pct(kpis.fl_ncr_pct, 0)}
           </Row>
-          <Row label="Net Collection Rate — TX" sub={kpis.ncr_billed_at} tone="warn">
+          <Row
+            label="Net Collection Rate — TX"
+            sub={kpis.ncr_billed_at}
+            source={<SourceTag source={today.tx_source_system} />}
+            tone="warn"
+          >
             {pct(kpis.tx_ncr_pct, 0)}
           </Row>
           <div className="mt-5">
-            <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-              Monthly revenue trend · 12 months
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Monthly revenue trend · 12 months
+              </div>
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                <SourceTag source={today.fl_source_system} />
+                <SourceTag source={today.tx_source_system} />
+              </div>
             </div>
             <div className="flex items-end gap-1" style={{ height: 80 }}>
               {trend.map((m) => {
@@ -142,6 +172,10 @@ export default async function FinancePage() {
             <div className="mt-2 flex justify-between text-[10px] text-slate-400">
               <span>{trend[0]?.month}</span>
               <span>{trend[trend.length - 1]?.month} (MTD)</span>
+            </div>
+            <div className="mt-1 text-[10px] italic text-slate-400">
+              HHA-wide (FL + TX). Provenance per source above. Combined for trend visualization;
+              each state still tagged at the row level upstream.
             </div>
           </div>
         </Card>
@@ -205,11 +239,13 @@ function BucketChart({
 function Row({
   label,
   sub,
+  source,
   tone,
   children,
 }: {
   label: string;
   sub: string;
+  source?: React.ReactNode;
   tone: "good" | "warn" | "bad";
   children: React.ReactNode;
 }) {
@@ -217,7 +253,10 @@ function Row({
   return (
     <div className="flex items-center justify-between border-b border-slate-100 py-2.5 last:border-0">
       <div>
-        <div className="text-sm font-medium text-slate-700">{label}</div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-slate-700">{label}</span>
+          {source}
+        </div>
         <div className="text-[11px] text-slate-500">{sub}</div>
       </div>
       <div className={`text-2xl font-bold tabular-nums ${toneClass}`}>{children}</div>
