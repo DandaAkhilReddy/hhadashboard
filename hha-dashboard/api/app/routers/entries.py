@@ -22,7 +22,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..deps import CurrentUser, DBDep, require_role
@@ -156,7 +156,7 @@ async def save_daily_census(
                     "entered_by_upn": user.upn,
                     "source": "manual",
                     "notes": row.notes,
-                    "updated_at": datetime.now(UTC),
+                    "updated_at": func.now(),
                 },
             )
         )
@@ -271,7 +271,7 @@ async def save_monthly_finance(
                     "source_system": source,
                     "entered_by_upn": user.upn,
                     "notes": row.notes,
-                    "updated_at": datetime.now(UTC),
+                    "updated_at": func.now(),
                 },
             )
         )
@@ -346,7 +346,7 @@ async def save_weekly_clinical(
                     "charts_audited_count": row.charts_audited_count,
                     "notes": row.notes,
                     "entered_by_upn": user.upn,
-                    "updated_at": datetime.now(UTC),
+                    "updated_at": func.now(),
                 },
             )
         )
@@ -418,7 +418,7 @@ async def save_weekly_hr(
                 "below_fmv_count": payload.below_fmv_count,
                 "notes": payload.notes,
                 "entered_by_upn": user.upn,
-                "updated_at": datetime.now(UTC),
+                "updated_at": func.now(),
             },
         )
     )
