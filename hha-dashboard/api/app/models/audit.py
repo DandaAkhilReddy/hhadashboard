@@ -12,6 +12,7 @@ Tier C (forbidden anyway), the test_schema_classification CI guard blocks the PR
 """
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -38,7 +39,9 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(
         String(10), nullable=False, info={"data_class": B}
     )  # INSERT | UPDATE | DELETE
-    diff: Mapped[dict] = mapped_column(JSON_VARIANT, nullable=False, info={"data_class": B})
+    diff: Mapped[dict[str, Any]] = mapped_column(
+        JSON_VARIANT, nullable=False, info={"data_class": B}
+    )
     changed_by_upn: Mapped[str] = mapped_column(
         String(200), nullable=False, info={"data_class": B}
     )
