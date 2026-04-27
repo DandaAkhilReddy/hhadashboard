@@ -19,7 +19,6 @@ import re
 from unittest.mock import patch
 from uuid import UUID
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.core import telemetry
