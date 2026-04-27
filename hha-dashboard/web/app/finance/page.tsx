@@ -1,6 +1,7 @@
 import { SourceTag } from "@/components/Badge";
 import { Card, CardHeader } from "@/components/Card";
 import { MetricCard } from "@/components/MetricCard";
+import { MonthlyRevenueChart } from "@/components/MonthlyRevenueChart";
 import { PageHeader } from "@/components/PageHeader";
 import { type ArBuckets, api } from "@/lib/api-client";
 import { pct, usd } from "@/lib/format";
@@ -28,8 +29,6 @@ export default async function FinancePage() {
     api.financeKpis(),
     api.monthlyTrend(),
   ]);
-
-  const trendMax = Math.max(...trend.map((m) => m.revenue_usd));
 
   return (
     <>
@@ -151,31 +150,10 @@ export default async function FinancePage() {
                 <SourceTag source={today.tx_source_system} />
               </div>
             </div>
-            <div className="flex items-end gap-1" style={{ height: 80 }}>
-              {trend.map((m) => {
-                const h = Math.max(4, Math.round((m.revenue_usd / trendMax) * 72));
-                const isCurrent = m === trend[trend.length - 1];
-                return (
-                  <div
-                    key={m.month}
-                    className="flex-1 text-center"
-                    title={`${m.month}: ${usd(m.revenue_usd)}`}
-                  >
-                    <div
-                      className={`mx-auto rounded ${isCurrent ? "bg-red-500" : "bg-indigo-500"}`}
-                      style={{ height: `${h}px` }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-2 flex justify-between text-[10px] text-slate-400">
-              <span>{trend[0]?.month}</span>
-              <span>{trend[trend.length - 1]?.month} (MTD)</span>
-            </div>
+            <MonthlyRevenueChart trend={trend} />
             <div className="mt-1 text-[10px] italic text-slate-400">
-              HHA-wide (FL + TX). Provenance per source above. Combined for trend visualization;
-              each state still tagged at the row level upstream.
+              HHA-wide (FL + TX). Provenance per source above. Each state is still tagged at the
+              row level upstream — combined here for visualization only.
             </div>
           </div>
         </Card>

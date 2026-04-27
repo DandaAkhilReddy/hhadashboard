@@ -1,6 +1,7 @@
 import { Badge } from "@/components/Badge";
 import { Card, CardHeader } from "@/components/Card";
-import { CensusTrendChart, buildTrendPoints } from "@/components/CensusTrendChart";
+import { CensusTrendChart } from "@/components/CensusTrendChart";
+import { buildTrendPoints } from "@/lib/trend-points";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { api } from "@/lib/api-client";
