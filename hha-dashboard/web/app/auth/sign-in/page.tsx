@@ -62,7 +62,9 @@ function SignInInner() {
 export default function SignInPage() {
   return (
     <Suspense
-      fallback={<div className="mx-auto mt-32 max-w-md text-center text-sm text-slate-500">Loading…</div>}
+      fallback={
+        <div className="mx-auto mt-32 max-w-md text-center text-sm text-slate-500">Loading…</div>
+      }
     >
       <SignInInner />
     </Suspense>
