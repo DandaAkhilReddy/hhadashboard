@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter
 
 from ..deps import DBDep, UserDep
@@ -8,7 +10,7 @@ router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 
 
 @router.get("/today", response_model=FinanceToday)
-async def finance_today(db: DBDep, user: UserDep) -> dict:
+async def finance_today(db: DBDep, user: UserDep) -> dict[str, Any]:
     _ = user
     return await fake_data.get_finance_today(db)
 
@@ -40,12 +42,12 @@ async def ar_aging(db: DBDep, user: UserDep) -> ArAging:
 
 
 @router.get("/kpis", response_model=FinanceKpis)
-async def finance_kpis(db: DBDep, user: UserDep) -> dict:
+async def finance_kpis(db: DBDep, user: UserDep) -> dict[str, Any]:
     _ = user
     return await fake_data.get_finance_kpis(db)
 
 
 @router.get("/monthly-trend", response_model=list[MonthRevenue])
-async def monthly_trend(user: UserDep) -> list[dict]:
+async def monthly_trend(user: UserDep) -> list[dict[str, Any]]:
     _ = user
     return fake_data.get_monthly_revenue_trend()

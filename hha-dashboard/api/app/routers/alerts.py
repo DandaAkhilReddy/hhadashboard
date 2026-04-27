@@ -11,6 +11,7 @@ Same response shape as before — frontend code is untouched.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter
 
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/api/v1", tags=["alerts"])
 
 
 @router.get("/alerts", response_model=list[Alert])
-async def current_alerts(db: DBDep, user: UserDep) -> list[dict]:
+async def current_alerts(db: DBDep, user: UserDep) -> list[dict[str, Any]]:
     _ = user
     today = datetime.now(UTC).date()
     candidates = await alert_engine.compute_alerts_for_date(db, today)
@@ -34,6 +35,6 @@ async def current_alerts(db: DBDep, user: UserDep) -> list[dict]:
 
 
 @router.get("/meta", response_model=Meta)
-async def meta() -> dict:
+async def meta() -> dict[str, Any]:
     """Data-source + freshness info (no auth required)."""
     return fake_data.get_meta()

@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -110,7 +110,7 @@ def _fake_site_row(s: SiteSpec, today: date) -> tuple[int, int]:
     return census, open_shifts
 
 
-def _build_site_row(s: SiteSpec, site_id: int, census: int, open_shifts: int) -> dict:
+def _build_site_row(s: SiteSpec, site_id: int, census: int, open_shifts: int) -> dict[str, Any]:
     """Compose a SiteToday-shaped dict from a SiteSpec + today's numbers."""
     variance_pct = ((census - s.avg_census) / s.avg_census * 100) if s.avg_census else 0
     return {
@@ -176,7 +176,7 @@ async def get_sites_today(
 
 async def get_site_today(
     db: AsyncSession, site_id: int, today: date | None = None
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Single-site variant of `get_sites_today`. Returns None if no such site."""
     today = today or date.today()
 
@@ -220,7 +220,7 @@ async def get_site_today(
 
 async def get_operations_summary(
     db: AsyncSession | None = None, today: date | None = None
-) -> dict:
+) -> dict[str, Any]:
     today = today or date.today()
     rows = await get_sites_today(db, today)
     fl = [r for r in rows if r["state"] == "FL"]
@@ -247,7 +247,7 @@ async def get_operations_summary(
 
 async def _latest_finance_by_state(
     db: AsyncSession, today: date
-) -> dict[str, dict]:
+) -> dict[str, dict[str, Any]]:
     """Return {state: row_dict} for the most recent MonthlyFinanceManual entry
     per state, in or before the current month. Empty dict if no rows.
     """
@@ -286,7 +286,7 @@ async def _latest_finance_by_state(
 
 async def get_finance_today(
     db: AsyncSession | None = None, today: date | None = None
-) -> dict:
+) -> dict[str, Any]:
     """Daily collections + MTD totals.
 
     Daily numbers stay deterministic-fake (we don't capture daily entries).
@@ -331,7 +331,7 @@ async def get_finance_today(
     }
 
 
-def _fake_ar(today: date) -> dict:
+def _fake_ar(today: date) -> dict[str, Any]:
     fl_total = 5_600_000 + int(_noise(("ar-fl", today.isoformat()), 200_000))
     fl_buckets = {
         "0-30": int(fl_total * 0.28),
@@ -358,7 +358,7 @@ def _fake_ar(today: date) -> dict:
 
 async def get_ar_aging(
     db: AsyncSession | None = None, today: date | None = None
-) -> dict:
+) -> dict[str, Any]:
     """5-bucket AR aging by state. Prefers DB row when present (per state)."""
     today = today or date.today()
     fake = _fake_ar(today)
@@ -394,7 +394,7 @@ async def get_ar_aging(
 
 async def get_finance_kpis(
     db: AsyncSession | None = None, today: date | None = None
-) -> dict:
+) -> dict[str, Any]:
     """Days-in-AR + NCR per state. Prefers DB when entry exists."""
     today = today or date.today()
     fl_days_in_ar = 39.9
@@ -448,7 +448,7 @@ def get_monthly_revenue_trend() -> list[dict]:
 
 async def _latest_clinical_by_state(
     db: AsyncSession, today: date
-) -> dict[str, dict]:
+) -> dict[str, dict[str, Any]]:
     """Return {state: row_dict} for the most recent WeeklyClinical entry per state
     (week_ending on or before today). Empty dict if no rows.
     """
@@ -477,7 +477,7 @@ async def _latest_clinical_by_state(
 
 async def get_clinical_summary(
     db: AsyncSession | None = None, today: date | None = None
-) -> dict:
+) -> dict[str, Any]:
     """Clinical board metrics. Prefers most-recent WeeklyClinical row per state."""
     today = today or date.today()
 
@@ -545,7 +545,7 @@ def get_credentials_expiring() -> list[dict]:
 
 async def get_people_summary(
     db: AsyncSession | None = None, today: date | None = None
-) -> dict:
+) -> dict[str, Any]:
     """People board headline tiles. Prefers most-recent WeeklyHrManual row."""
     today = today or date.today()
 
@@ -719,7 +719,7 @@ def get_current_alerts(today: date | None = None) -> list[dict]:
 # ----- Meta / refresh -----
 
 
-def get_meta() -> dict:
+def get_meta() -> dict[str, Any]:
     return {
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "data_source": "fake_data_service",

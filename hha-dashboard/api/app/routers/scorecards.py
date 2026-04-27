@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter
 
 from ..deps import UserDep
@@ -10,7 +12,7 @@ router = APIRouter(prefix="/api/v1/scorecards", tags=["scorecards"])
 
 
 @router.get("", response_model=list[ScorecardOut])
-async def list_scorecards(user: UserDep) -> list[dict]:
+async def list_scorecards(user: UserDep) -> list[dict[str, Any]]:
     """Exec-visible scorecard list. Doctors never see themselves.
 
     The qualitative `mgma_band` is visible to anyone authenticated. The

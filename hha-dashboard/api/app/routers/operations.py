@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -15,19 +16,19 @@ router = APIRouter(prefix="/api/v1/operations", tags=["operations"])
 
 
 @router.get("/summary", response_model=OperationsSummary)
-async def operations_summary(db: DBDep, user: UserDep) -> dict:
+async def operations_summary(db: DBDep, user: UserDep) -> dict[str, Any]:
     _ = user
     return await fake_data.get_operations_summary(db)
 
 
 @router.get("/sites-today", response_model=list[SiteToday])
-async def sites_today(db: DBDep, user: UserDep) -> list[dict]:
+async def sites_today(db: DBDep, user: UserDep) -> list[dict[str, Any]]:
     _ = user
     return await fake_data.get_sites_today(db)
 
 
 @router.get("/sites/{site_id}", response_model=SiteDetail)
-async def site_detail(db: DBDep, user: UserDep, site_id: int) -> dict:
+async def site_detail(db: DBDep, user: UserDep, site_id: int) -> dict[str, Any]:
     """Per-facility detail: today's row + 14-day history + entered_today flag."""
     _ = user
 
