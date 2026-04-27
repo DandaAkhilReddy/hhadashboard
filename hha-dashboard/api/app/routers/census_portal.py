@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..deps import DBDep
@@ -122,6 +122,7 @@ async def login(
                 state=s.state,
                 census=by_site[s.id].census if s.id in by_site else None,
                 open_shifts=by_site[s.id].open_shifts if s.id in by_site else 0,
+                entered_at=by_site[s.id].updated_at if s.id in by_site else None,
             )
             for s in sites
         ],
@@ -156,6 +157,7 @@ async def list_sites_with_today(
                 state=s.state,
                 census=by_site[s.id].census if s.id in by_site else None,
                 open_shifts=by_site[s.id].open_shifts if s.id in by_site else 0,
+                entered_at=by_site[s.id].updated_at if s.id in by_site else None,
             )
             for s in sites
         ],
@@ -224,7 +226,12 @@ async def save_daily_census(
                     "open_shifts": row.open_shifts,
                     "entered_by_upn": PORTAL_UPN,
                     "source": PORTAL_SOURCE,
-                    "updated_at": datetime.now(UTC),
+                    # Use the DB clock (func.now()) for consistency with the
+                    # INSERT path's server_default=func.now() — Python's
+                    # datetime.now(UTC) can drift behind the DB clock and
+                    # produce a re-save timestamp older than the original
+                    # INSERT, breaking "entered HH:MM" displays in the portal.
+                    "updated_at": func.now(),
                 },
             )
         )
@@ -250,6 +257,7 @@ async def save_daily_census(
             census=e.census,
             open_shifts=e.open_shifts,
             source=e.source,
+            entered_at=e.updated_at,
         )
         for e in saved
     ]

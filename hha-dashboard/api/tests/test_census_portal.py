@@ -253,6 +253,196 @@ async def test_daily_census_with_valid_session_writes_with_manual_portal_source(
         await session.commit()
 
 
+async def test_prefill_includes_entered_at_for_existing_entries(
+    seeded_credential,
+) -> None:
+    """Login response must carry `entered_at` for any site that already has a
+    DailyEntry today, and `null` for sites that don't. The portal UI uses this
+    to decide whether to render the row in locked-with-Edit state."""
+    _ = seeded_credential
+    today = datetime.now(UTC).date()
+
+    async with SessionLocal() as session:
+        existing_sites = (await session.execute(select(Site))).scalars().all()
+        if not existing_sites:
+            session.add(Site(name="Test Site", state="FL", status="ACTIVE"))
+            await session.commit()
+            existing_sites = (await session.execute(select(Site))).scalars().all()
+        seeded_site_id = existing_sites[0].id
+        unseeded_site_id = existing_sites[1].id if len(existing_sites) > 1 else None
+
+        # Pre-seed today's entry for one site so we have a known entered_at.
+        await session.execute(
+            delete(DailyEntry).where(DailyEntry.entry_date == today)
+        )
+        session.add(
+            DailyEntry(
+                site_id=seeded_site_id,
+                entry_date=today,
+                census=88,
+                open_shifts=2,
+                entered_by_upn="census-portal@hhamedicine.com",
+                source="manual_portal",
+            )
+        )
+        await session.commit()
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            login_r = await client.post(
+                "/api/v1/census-portal/login",
+                json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+            )
+        assert login_r.status_code == 200
+        sites = {s["site_id"]: s for s in login_r.json()["sites"]}
+
+        seeded_row = sites[seeded_site_id]
+        assert seeded_row["census"] == 88
+        assert seeded_row["entered_at"] is not None, (
+            "site with an existing entry must surface entered_at"
+        )
+
+        if unseeded_site_id is not None:
+            unseeded_row = sites[unseeded_site_id]
+            assert unseeded_row["census"] is None
+            assert unseeded_row["entered_at"] is None, (
+                "site without an entry today must have entered_at=null"
+            )
+    finally:
+        async with SessionLocal() as session:
+            await session.execute(
+                delete(DailyEntry).where(DailyEntry.entry_date == today)
+            )
+            await session.commit()
+
+
+async def test_save_response_includes_entered_at(seeded_credential) -> None:
+    """POST /daily-census must return `entered_at` on every saved row so the
+    frontend can immediately flip the row into the locked-with-Edit state
+    without a follow-up GET."""
+    _ = seeded_credential
+    today = datetime.now(UTC).date()
+
+    async with SessionLocal() as session:
+        existing_sites = (await session.execute(select(Site))).scalars().all()
+        if not existing_sites:
+            session.add(Site(name="Test Site", state="FL", status="ACTIVE"))
+            await session.commit()
+        await session.execute(
+            delete(DailyEntry).where(DailyEntry.entry_date == today)
+        )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        login_r = await client.post(
+            "/api/v1/census-portal/login",
+            json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+        )
+        assert login_r.status_code == 200
+        site_id = login_r.json()["sites"][0]["site_id"]
+        cookie = login_r.cookies.get("census_session")
+        assert cookie is not None
+
+        r = await client.post(
+            "/api/v1/census-portal/daily-census",
+            cookies={"census_session": cookie},
+            json={
+                "entry_date": today.isoformat(),
+                "rows": [{"site_id": site_id, "census": 50, "open_shifts": 0}],
+            },
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["entered_at"] is not None
+    # Datetime parses without raising — locks the wire shape.
+    datetime.fromisoformat(body[0]["entered_at"].replace("Z", "+00:00"))
+
+    async with SessionLocal() as session:
+        await session.execute(
+            delete(DailyEntry).where(
+                DailyEntry.site_id == site_id, DailyEntry.entry_date == today
+            )
+        )
+        await session.commit()
+
+
+async def test_re_save_advances_entered_at_timestamp(seeded_credential) -> None:
+    """Locks the audit-friendly story: editing an already-entered row updates
+    `updated_at` (which the API surfaces as `entered_at`). The frontend's
+    "entered HH:MM" timestamp will move forward after every Edit → Save.
+
+    Combined with the audit-trigger coverage merged in T13, this means a re-save
+    produces an UPDATE row in audit.audit_log with the new value — the change
+    history the portal user wants for "I see who edited what when."
+    """
+    _ = seeded_credential
+    today = datetime.now(UTC).date()
+
+    async with SessionLocal() as session:
+        existing_sites = (await session.execute(select(Site))).scalars().all()
+        if not existing_sites:
+            session.add(Site(name="Test Site", state="FL", status="ACTIVE"))
+            await session.commit()
+        await session.execute(
+            delete(DailyEntry).where(DailyEntry.entry_date == today)
+        )
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        login_r = await client.post(
+            "/api/v1/census-portal/login",
+            json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+        )
+        site_id = login_r.json()["sites"][0]["site_id"]
+        cookie = login_r.cookies.get("census_session")
+        assert cookie is not None
+
+        first = await client.post(
+            "/api/v1/census-portal/daily-census",
+            cookies={"census_session": cookie},
+            json={
+                "entry_date": today.isoformat(),
+                "rows": [{"site_id": site_id, "census": 100, "open_shifts": 0}],
+            },
+        )
+        assert first.status_code == 200
+        first_ts = datetime.fromisoformat(
+            first.json()[0]["entered_at"].replace("Z", "+00:00")
+        )
+
+        # Re-save with a new census — the user's "Edit → Save" path.
+        second = await client.post(
+            "/api/v1/census-portal/daily-census",
+            cookies={"census_session": cookie},
+            json={
+                "entry_date": today.isoformat(),
+                "rows": [{"site_id": site_id, "census": 105, "open_shifts": 0}],
+            },
+        )
+        assert second.status_code == 200
+        second_ts = datetime.fromisoformat(
+            second.json()[0]["entered_at"].replace("Z", "+00:00")
+        )
+
+    assert second.json()[0]["census"] == 105
+    assert second_ts >= first_ts, "re-save must advance entered_at"
+
+    async with SessionLocal() as session:
+        await session.execute(
+            delete(DailyEntry).where(
+                DailyEntry.site_id == site_id, DailyEntry.entry_date == today
+            )
+        )
+        await session.commit()
+
+
 async def test_logout_clears_session(seeded_credential) -> None:
     _ = seeded_credential
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

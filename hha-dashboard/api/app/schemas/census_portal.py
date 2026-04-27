@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -15,13 +15,20 @@ class LoginIn(BaseModel):
 
 
 class PortalSiteOut(BaseModel):
-    """One facility row, prefilled with today's existing census (or null)."""
+    """One facility row, prefilled with today's existing census (or null).
+
+    `entered_at` carries the row's last-saved timestamp (DailyEntry.updated_at)
+    so the portal UI can render an already-entered row in the locked
+    "✓ <value> · entered <HH:MM> · [Edit]" state instead of an empty input.
+    None for rows the user hasn't touched today.
+    """
 
     site_id: int
     site_name: str
     state: str
     census: int | None
     open_shifts: int
+    entered_at: datetime | None
 
 
 class PortalLoginOut(BaseModel):
@@ -58,7 +65,12 @@ class PortalCensusBatchIn(BaseModel):
 
 
 class PortalCensusOut(BaseModel):
-    """One persisted row, mirrored back to the client."""
+    """One persisted row, mirrored back to the client.
+
+    `entered_at` is always populated (the row was just saved), so the
+    frontend can flip the row back to its locked "Edit"-state without
+    a follow-up GET.
+    """
 
     site_id: int
     site_name: str
@@ -67,3 +79,4 @@ class PortalCensusOut(BaseModel):
     census: int
     open_shifts: int
     source: str
+    entered_at: datetime
