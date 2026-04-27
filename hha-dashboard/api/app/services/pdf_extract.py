@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass, field
 
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import AnalyzeResult
+from azure.ai.documentintelligence.models import AnalyzeDocumentRequest, AnalyzeResult
 from azure.core.credentials import AzureKeyCredential
 from azure.identity.aio import DefaultAzureCredential
 from rapidfuzz import fuzz, process
@@ -95,9 +95,14 @@ def _cell_as_int(value: str) -> int | None:
 
 
 def _extract_tables_from_result(result: AnalyzeResult) -> list[list[list[str]]]:
-    """Return [table][row][col] as strings."""
+    """Return [table][row][col] as strings.
+
+    Defensive against the empty-tables case: a PDF with no extractable tables
+    leaves `result.tables` as None (or empty list); this function returns []
+    rather than crashing with a None-iter error.
+    """
     tables: list[list[list[str]]] = []
-    if not getattr(result, "tables", None):
+    if not result.tables:
         return tables
     for table in result.tables:
         rows_by_idx: dict[int, dict[int, str]] = {}
@@ -121,8 +126,10 @@ def _match_row_to_site(
     Returns (SiteMatch or None, is_matched). If no cell fuzzy-matches a known
     site OR no cell parses as an integer, returns (None, False).
     """
-    # Find the cell most likely to be the site name (try each)
-    best_match: tuple[str, int, int] | None = None  # (site, score, cell_idx)
+    # Find the cell most likely to be the site name (try each).
+    # rapidfuzz returns float scores 0-100; we keep them as float internally
+    # and convert to int only when storing in SiteMatch.confidence.
+    best_match: tuple[str, float, int] | None = None  # (site, score, cell_idx)
     for idx, cell in enumerate(row):
         if not cell or len(cell.strip()) < 3:
             continue
@@ -152,7 +159,7 @@ def _match_row_to_site(
             return SiteMatch(
                 site_name=site_name,
                 census=n,
-                confidence=score,
+                confidence=int(score),
                 raw_row=list(row),
             ), True
 
@@ -178,10 +185,13 @@ async def extract_census_from_pdf(
 
     client = _build_di_client()
     try:
+        # SDK 1.x dropped the (model_id, body=bytes, content_type=...) overload.
+        # The supported call is `body=AnalyzeDocumentRequest(bytes_source=...)`,
+        # which the SDK base64-encodes per the `format="base64"` rest field on
+        # AnalyzeDocumentRequest.bytes_source. Audit ticket T8.
         poller = await client.begin_analyze_document(
             model_id="prebuilt-layout",
-            body=pdf_bytes,
-            content_type="application/pdf",
+            body=AnalyzeDocumentRequest(bytes_source=pdf_bytes),
         )
         di_result: AnalyzeResult = await poller.result()
     finally:
