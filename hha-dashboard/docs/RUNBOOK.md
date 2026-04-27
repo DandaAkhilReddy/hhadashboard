@@ -475,7 +475,8 @@ WHERE changed_by_upn = '__system__'
 
 ## F. Where to find more
 
-- **System overview** → [Architecture.md](Architecture.md)
+- **System overview** → [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Day-1 environment setup** → [ONBOARDING.md](ONBOARDING.md)
 - **Why we made the calls we made** → [docs/adr/](adr/)
 - **Build plan + session history** → [SESSION_RECAP_*.md](.) and the build plan in `.claude/plans/`
 - **HIPAA classification** → [ADR-001](adr/001-hipaa-data-classification.md)
