@@ -152,8 +152,8 @@ export default async function FinancePage() {
             </div>
             <MonthlyRevenueChart trend={trend} />
             <div className="mt-1 text-[10px] italic text-slate-400">
-              HHA-wide (FL + TX). Provenance per source above. Each state is still tagged at the
-              row level upstream — combined here for visualization only.
+              HHA-wide (FL + TX). Provenance per source above. Each state is still tagged at the row
+              level upstream — combined here for visualization only.
             </div>
           </div>
         </Card>

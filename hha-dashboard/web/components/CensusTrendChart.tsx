@@ -1,5 +1,6 @@
 "use client";
 
+import type { DayPoint } from "@/lib/trend-points";
 import {
   Bar,
   BarChart,
@@ -11,7 +12,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { DayPoint } from "@/lib/trend-points";
 
 /**
  * 14-bar census trend with a 3-mo-avg reference line. Built on Recharts.
