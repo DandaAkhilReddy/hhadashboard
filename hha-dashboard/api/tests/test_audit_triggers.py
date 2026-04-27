@@ -15,6 +15,13 @@ These tests run against the live Postgres docker container — they verify:
   - audit.audit_log itself is NOT triggered (no recursion)
   - Non-audited tables (masters.sites) produce no audit rows
 
+T13 lock-in (audit ticket): the original tests above only cover
+`entries.daily_entries`. The lower half of this file adds parameterized
+coverage across all 9 audited tables — every table gets a trigger-attached
+metadata check + INSERT/UPDATE/DELETE smoke test that asserts an audit
+row is written with the right `action`. Catches regressions like "trigger
+silently dropped" or "AUDITED_TABLES list edited without re-running 0007."
+
 These tests require Docker Postgres up and migrations applied. They are
 skipped automatically if the connection fails — the unit tests still cover
 the logic that doesn't touch the database.
@@ -22,7 +29,9 @@ the logic that doesn't touch the database.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
@@ -290,3 +299,571 @@ async def test_upn_propagates_from_session_guc(session: AsyncSession) -> None:
     finally:
         await _cleanup(session, custom_upn, site_id)
         set_current_upn("trigger-test@hha.com")  # restore
+
+
+# ===================================================================
+# T13: parameterized smoke coverage across all 9 audited tables
+# ===================================================================
+#
+# Mirror the AUDITED_TABLES list from migration 0007. Order matters only
+# for test readability — pytest will run them in this sequence per param.
+
+AUDITED_TABLES_FQN: list[tuple[str, str]] = [
+    ("masters", "physicians"),
+    ("masters", "comp_agreements"),
+    ("masters", "contracts"),
+    ("masters", "credentials"),
+    ("masters", "site_coverage"),
+    ("entries", "daily_entries"),
+    ("entries", "monthly_finance_manual"),
+    ("entries", "weekly_clinical"),
+    ("entries", "weekly_hr_manual"),
+]
+
+
+@pytest.mark.parametrize(("schema", "table"), AUDITED_TABLES_FQN)
+async def test_audit_trigger_attached_to_each_audited_table(
+    session: AsyncSession, schema: str, table: str
+) -> None:
+    """Migration 0007 attaches `audit_<table>_change` to every entry in
+    AUDITED_TABLES. A regression here = silent audit gap. We check via
+    pg_trigger metadata rather than exercising INSERT, so this stays cheap
+    and runs as the first sanity gate before the heavier I/O tests below.
+    """
+    result = await session.execute(
+        text(
+            "SELECT 1 FROM pg_trigger t "
+            "JOIN pg_class c ON t.tgrelid = c.oid "
+            "JOIN pg_namespace n ON c.relnamespace = n.oid "
+            "WHERE n.nspname = :schema AND c.relname = :table "
+            "AND t.tgname = :tgname AND NOT t.tgisinternal"
+        ),
+        {"schema": schema, "table": table, "tgname": f"audit_{table}_change"},
+    )
+    assert result.scalar_one_or_none() == 1, (
+        f"audit_{table}_change trigger missing on {schema}.{table} — "
+        "migration 0007 may have been edited without updating AUDITED_TABLES."
+    )
+
+
+# ----------- Per-table seed/update/delete dispatch -----------
+#
+# Each table has unique NOT NULL columns and FK requirements. Rather than
+# writing one giant test per table, we keep the test bodies parameterized
+# and dispatch the SQL via this map. Every entry returns (row_id) so the
+# test can issue UPDATE/DELETE against it.
+
+# Type alias for the dispatch fns: takes (session, ctx) → row id
+SeedFn = Callable[[AsyncSession, "_TableOpCtx"], Awaitable[int]]
+MutateFn = Callable[[AsyncSession, "_TableOpCtx", int], Awaitable[None]]
+
+
+class _TableOpCtx:
+    """Pre-baked parents (site, physician) shared across each parameterized
+    test invocation. Tests use `ctx.suffix` to keep INSERTs unique under
+    the per-table UNIQUE constraints (e.g. one_finance_per_month_per_state).
+    """
+
+    def __init__(self, site_id: int, physician_id: int, upn: str, suffix: str) -> None:
+        self.site_id = site_id
+        self.physician_id = physician_id
+        self.upn = upn
+        self.suffix = suffix
+
+
+# ----- masters.physicians -----
+async def _seed_physicians(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text("INSERT INTO masters.physicians (name) VALUES (:n) RETURNING id"),
+        {"n": f"T13-Phys-{ctx.suffix}"},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_physicians(s: AsyncSession, ctx: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("UPDATE masters.physicians SET name = :n WHERE id = :id"),
+        {"n": f"T13-Phys-UPDATED-{ctx.suffix}", "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_physicians(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(text("DELETE FROM masters.physicians WHERE id = :id"), {"id": rid})
+    await s.commit()
+
+
+# ----- masters.comp_agreements -----
+async def _seed_comp_agreements(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO masters.comp_agreements "
+            "(physician_id, effective_from, employment_type, fmv_benchmark_usd) "
+            "VALUES (:pid, :ef, 'W2', 250000) RETURNING id"
+        ),
+        {"pid": ctx.physician_id, "ef": date(2026, 1, 1)},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_comp_agreements(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("UPDATE masters.comp_agreements SET fmv_benchmark_usd = :v WHERE id = :id"),
+        {"v": Decimal("275000.00"), "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_comp_agreements(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(text("DELETE FROM masters.comp_agreements WHERE id = :id"), {"id": rid})
+    await s.commit()
+
+
+# ----- masters.contracts -----
+async def _seed_contracts(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO masters.contracts "
+            "(site_id, start_date, end_date, annual_subsidy_usd) "
+            "VALUES (:sid, :sd, :ed, :amt) RETURNING id"
+        ),
+        {
+            "sid": ctx.site_id,
+            "sd": date(2026, 1, 1),
+            "ed": date(2026, 12, 31),
+            "amt": Decimal("100000.00"),
+        },
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_contracts(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("UPDATE masters.contracts SET annual_subsidy_usd = :v WHERE id = :id"),
+        {"v": Decimal("125000.00"), "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_contracts(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(text("DELETE FROM masters.contracts WHERE id = :id"), {"id": rid})
+    await s.commit()
+
+
+# ----- masters.credentials -----
+async def _seed_credentials(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO masters.credentials "
+            "(physician_id, type, expires_on) "
+            "VALUES (:pid, 'STATE_LICENSE', :ex) RETURNING id"
+        ),
+        {"pid": ctx.physician_id, "ex": date(2027, 12, 31)},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_credentials(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("UPDATE masters.credentials SET status = :v WHERE id = :id"),
+        {"v": "EXPIRED", "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_credentials(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(text("DELETE FROM masters.credentials WHERE id = :id"), {"id": rid})
+    await s.commit()
+
+
+# ----- masters.site_coverage -----
+async def _seed_site_coverage(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO masters.site_coverage "
+            "(site_id, physician_id, role, start_date) "
+            "VALUES (:sid, :pid, 'MEDICAL_DIRECTOR', :sd) RETURNING id"
+        ),
+        {"sid": ctx.site_id, "pid": ctx.physician_id, "sd": date(2026, 1, 1)},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_site_coverage(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("UPDATE masters.site_coverage SET role = :v WHERE id = :id"),
+        {"v": "COVERING", "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_site_coverage(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(text("DELETE FROM masters.site_coverage WHERE id = :id"), {"id": rid})
+    await s.commit()
+
+
+# ----- entries.daily_entries -----
+async def _seed_daily_entries(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    # entry_date must be unique per site; use suffix-derived offset to avoid
+    # collisions across the 4 invocations (insert + update + delete + attach)
+    # for the same site.
+    r = await s.execute(
+        text(
+            "INSERT INTO entries.daily_entries "
+            "(site_id, entry_date, census, open_shifts, entered_by_upn, source) "
+            "VALUES (:sid, :d, 100, 0, :upn, 'manual') RETURNING id"
+        ),
+        {"sid": ctx.site_id, "d": date(2026, 6, 1), "upn": ctx.upn},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_daily_entries(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("UPDATE entries.daily_entries SET census = :v WHERE id = :id"),
+        {"v": 105, "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_daily_entries(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(text("DELETE FROM entries.daily_entries WHERE id = :id"), {"id": rid})
+    await s.commit()
+
+
+# ----- entries.monthly_finance_manual -----
+async def _seed_monthly_finance_manual(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO entries.monthly_finance_manual ("
+            "year, month, period_first, state, "
+            "collections_usd, ar_total_usd, "
+            "net_collection_rate_pct, days_in_ar, "
+            "source_system, entered_by_upn"
+            ") VALUES ("
+            "2026, 6, :pf, 'TX', "
+            "100000, 50000, "
+            "95.00, 30.00, "
+            "'HHA_TX_MANUAL', :upn"
+            ") RETURNING id"
+        ),
+        {"pf": date(2026, 6, 1), "upn": ctx.upn},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_monthly_finance_manual(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text(
+            "UPDATE entries.monthly_finance_manual SET collections_usd = :v WHERE id = :id"
+        ),
+        {"v": Decimal("110000.00"), "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_monthly_finance_manual(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("DELETE FROM entries.monthly_finance_manual WHERE id = :id"), {"id": rid}
+    )
+    await s.commit()
+
+
+# ----- entries.weekly_clinical -----
+async def _seed_weekly_clinical(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO entries.weekly_clinical ("
+            "week_ending, state, hp_24h_pct, dc_48h_pct, avg_los_days, entered_by_upn"
+            ") VALUES (:we, 'TX', 92.5, 88.0, 4.2, :upn) RETURNING id"
+        ),
+        {"we": date(2026, 6, 7), "upn": ctx.upn},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_weekly_clinical(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("UPDATE entries.weekly_clinical SET hp_24h_pct = :v WHERE id = :id"),
+        {"v": Decimal("94.00"), "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_weekly_clinical(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(text("DELETE FROM entries.weekly_clinical WHERE id = :id"), {"id": rid})
+    await s.commit()
+
+
+# ----- entries.weekly_hr_manual -----
+async def _seed_weekly_hr_manual(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO entries.weekly_hr_manual ("
+            "week_ending, headcount_w2, headcount_1099, entered_by_upn"
+            ") VALUES (:we, 25, 5, :upn) RETURNING id"
+        ),
+        {"we": date(2026, 6, 7), "upn": ctx.upn},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_weekly_hr_manual(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("UPDATE entries.weekly_hr_manual SET headcount_w2 = :v WHERE id = :id"),
+        {"v": 27, "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_weekly_hr_manual(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(text("DELETE FROM entries.weekly_hr_manual WHERE id = :id"), {"id": rid})
+    await s.commit()
+
+
+# Dispatch map keyed by "schema.table" → (seed, update, delete) triple.
+TABLE_OPS: dict[str, tuple[SeedFn, MutateFn, MutateFn]] = {
+    "masters.physicians": (_seed_physicians, _update_physicians, _delete_physicians),
+    "masters.comp_agreements": (
+        _seed_comp_agreements,
+        _update_comp_agreements,
+        _delete_comp_agreements,
+    ),
+    "masters.contracts": (_seed_contracts, _update_contracts, _delete_contracts),
+    "masters.credentials": (_seed_credentials, _update_credentials, _delete_credentials),
+    "masters.site_coverage": (_seed_site_coverage, _update_site_coverage, _delete_site_coverage),
+    "entries.daily_entries": (_seed_daily_entries, _update_daily_entries, _delete_daily_entries),
+    "entries.monthly_finance_manual": (
+        _seed_monthly_finance_manual,
+        _update_monthly_finance_manual,
+        _delete_monthly_finance_manual,
+    ),
+    "entries.weekly_clinical": (
+        _seed_weekly_clinical,
+        _update_weekly_clinical,
+        _delete_weekly_clinical,
+    ),
+    "entries.weekly_hr_manual": (
+        _seed_weekly_hr_manual,
+        _update_weekly_hr_manual,
+        _delete_weekly_hr_manual,
+    ),
+}
+
+# Sanity: dispatch must cover every audited table — fails fast if someone
+# adds to AUDITED_TABLES without adding a spec here.
+assert set(TABLE_OPS.keys()) == {f"{s}.{t}" for s, t in AUDITED_TABLES_FQN}, (
+    "TABLE_OPS keys must match AUDITED_TABLES_FQN"
+)
+
+
+async def _fresh_op_ctx(session: AsyncSession, table_fqn: str) -> _TableOpCtx:
+    """Pre-create a site + physician parent per parameterized test invocation.
+    Each invocation gets unique parent IDs so cleanup can be table-scoped.
+    """
+    upn = f"t13-{table_fqn.replace('.', '-')}@hha.com"
+    set_current_upn(upn)
+    suffix = table_fqn.replace(".", "-")
+
+    site_result = await session.execute(
+        text(
+            "INSERT INTO masters.sites (name, state, status) "
+            "VALUES (:n, 'FL', 'ACTIVE') RETURNING id"
+        ),
+        {"n": f"T13-Site-{suffix}"},
+    )
+    site_id = int(site_result.scalar_one())
+    await session.commit()
+
+    phys_result = await session.execute(
+        text("INSERT INTO masters.physicians (name) VALUES (:n) RETURNING id"),
+        {"n": f"T13-Parent-Phys-{suffix}"},
+    )
+    physician_id = int(phys_result.scalar_one())
+    await session.commit()
+
+    return _TableOpCtx(site_id=site_id, physician_id=physician_id, upn=upn, suffix=suffix)
+
+
+async def _scrub_ctx(session: AsyncSession, ctx: _TableOpCtx) -> None:
+    """Tear down everything created by this test invocation. Order matters:
+    audit_log first (FK-free), then the dependent rows, then the parents.
+    """
+    await session.execute(
+        text("DELETE FROM audit.audit_log WHERE changed_by_upn = :upn"),
+        {"upn": ctx.upn},
+    )
+    # Clean every audited table that may have referenced our parents. Safe to
+    # blanket-delete by FK because the test only ever inserted one row per
+    # table per parent within its own UPN scope.
+    await session.execute(
+        text("DELETE FROM masters.site_coverage WHERE site_id = :sid OR physician_id = :pid"),
+        {"sid": ctx.site_id, "pid": ctx.physician_id},
+    )
+    await session.execute(
+        text("DELETE FROM masters.credentials WHERE physician_id = :pid"),
+        {"pid": ctx.physician_id},
+    )
+    await session.execute(
+        text("DELETE FROM masters.comp_agreements WHERE physician_id = :pid"),
+        {"pid": ctx.physician_id},
+    )
+    await session.execute(
+        text("DELETE FROM masters.contracts WHERE site_id = :sid"), {"sid": ctx.site_id}
+    )
+    await session.execute(
+        text("DELETE FROM entries.daily_entries WHERE site_id = :sid"), {"sid": ctx.site_id}
+    )
+    # Finance / clinical / HR tables are not FK-linked to our parents — their
+    # rows are addressed by entered_by_upn (matches our isolated test UPN).
+    await session.execute(
+        text("DELETE FROM entries.monthly_finance_manual WHERE entered_by_upn = :upn"),
+        {"upn": ctx.upn},
+    )
+    await session.execute(
+        text("DELETE FROM entries.weekly_clinical WHERE entered_by_upn = :upn"),
+        {"upn": ctx.upn},
+    )
+    await session.execute(
+        text("DELETE FROM entries.weekly_hr_manual WHERE entered_by_upn = :upn"),
+        {"upn": ctx.upn},
+    )
+    # Now the parents.
+    await session.execute(
+        text("DELETE FROM masters.physicians WHERE id = :id"), {"id": ctx.physician_id}
+    )
+    await session.execute(
+        text("DELETE FROM masters.sites WHERE id = :id"), {"id": ctx.site_id}
+    )
+    # Re-clean audit_log: every DELETE above also fires triggers.
+    await session.execute(
+        text("DELETE FROM audit.audit_log WHERE changed_by_upn = :upn"),
+        {"upn": ctx.upn},
+    )
+    await session.commit()
+    set_current_upn("trigger-test@hha.com")  # restore default
+
+
+@pytest.mark.parametrize("table_fqn", list(TABLE_OPS.keys()))
+async def test_insert_writes_audit_row_for_every_audited_table(
+    session: AsyncSession, table_fqn: str
+) -> None:
+    """For each audited table: a minimum-fields INSERT must produce exactly
+    one audit row with action='INSERT' attributed to the test UPN. This
+    catches schema drift (e.g. a NOT NULL added without updating the trigger
+    function's NEW serialization)."""
+    seed, _, _ = TABLE_OPS[table_fqn]
+    ctx = await _fresh_op_ctx(session, table_fqn)
+    schema, table = table_fqn.split(".", 1)
+    try:
+        before = await _audit_count_for(session, table, ctx.upn)
+        rid = await seed(session, ctx)
+        assert rid > 0
+        after = await _audit_count_for(session, table, ctx.upn)
+        assert after == before + 1, (
+            f"INSERT into {schema}.{table} should write exactly one audit row "
+            f"for upn={ctx.upn}; saw {after - before}"
+        )
+
+        # Tighten: confirm the row really has action='INSERT' (not just count).
+        row = (
+            await session.execute(
+                text(
+                    "SELECT action FROM audit.audit_log "
+                    "WHERE table_name = :t AND changed_by_upn = :upn "
+                    "ORDER BY changed_at DESC LIMIT 1"
+                ),
+                {"t": table, "upn": ctx.upn},
+            )
+        ).scalar_one()
+        assert row == "INSERT"
+    finally:
+        await _scrub_ctx(session, ctx)
+
+
+@pytest.mark.parametrize("table_fqn", list(TABLE_OPS.keys()))
+async def test_update_writes_audit_row_for_every_audited_table(
+    session: AsyncSession, table_fqn: str
+) -> None:
+    """For each audited table: an UPDATE that changes a real value (not just
+    timestamps) must produce one new audit row with action='UPDATE'."""
+    seed, update, _ = TABLE_OPS[table_fqn]
+    ctx = await _fresh_op_ctx(session, table_fqn)
+    _, table = table_fqn.split(".", 1)
+    try:
+        rid = await seed(session, ctx)
+        # Drop the INSERT audit row so the count cleanly reflects only the UPDATE.
+        await session.execute(
+            text("DELETE FROM audit.audit_log WHERE changed_by_upn = :upn"),
+            {"upn": ctx.upn},
+        )
+        await session.commit()
+
+        await update(session, ctx, rid)
+
+        row = (
+            await session.execute(
+                text(
+                    "SELECT action FROM audit.audit_log "
+                    "WHERE table_name = :t AND changed_by_upn = :upn "
+                    "ORDER BY changed_at DESC LIMIT 1"
+                ),
+                {"t": table, "upn": ctx.upn},
+            )
+        ).scalar_one()
+        assert row == "UPDATE"
+    finally:
+        await _scrub_ctx(session, ctx)
+
+
+@pytest.mark.parametrize("table_fqn", list(TABLE_OPS.keys()))
+async def test_delete_writes_audit_row_for_every_audited_table(
+    session: AsyncSession, table_fqn: str
+) -> None:
+    """For each audited table: a DELETE must produce one audit row with
+    action='DELETE'. Locks that the trigger fires on row removal even when
+    the row is the last reference (no FK cascades to other audited tables)."""
+    seed, _, delete = TABLE_OPS[table_fqn]
+    ctx = await _fresh_op_ctx(session, table_fqn)
+    _, table = table_fqn.split(".", 1)
+    try:
+        rid = await seed(session, ctx)
+        await session.execute(
+            text("DELETE FROM audit.audit_log WHERE changed_by_upn = :upn"),
+            {"upn": ctx.upn},
+        )
+        await session.commit()
+
+        await delete(session, ctx, rid)
+
+        row = (
+            await session.execute(
+                text(
+                    "SELECT action FROM audit.audit_log "
+                    "WHERE table_name = :t AND changed_by_upn = :upn "
+                    "ORDER BY changed_at DESC LIMIT 1"
+                ),
+                {"t": table, "upn": ctx.upn},
+            )
+        ).scalar_one()
+        assert row == "DELETE"
+    finally:
+        await _scrub_ctx(session, ctx)
