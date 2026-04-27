@@ -61,7 +61,8 @@ async def _clean_masters() -> None:
         await db.commit()
 
 
-async def test_seed_lands_eleven_sites_on_clean_db(_clean_masters: None) -> None:
+@pytest.mark.usefixtures("_clean_masters")
+async def test_seed_lands_eleven_sites_on_clean_db() -> None:
     await seed()
     async with SessionLocal() as db:
         rows = (await db.execute(select(Site.state))).scalars().all()
@@ -70,7 +71,8 @@ async def test_seed_lands_eleven_sites_on_clean_db(_clean_masters: None) -> None
     assert sum(1 for s in rows if s == "TX") == 4
 
 
-async def test_seed_is_idempotent(_clean_masters: None) -> None:
+@pytest.mark.usefixtures("_clean_masters")
+async def test_seed_is_idempotent() -> None:
     await seed()
     await seed()
     async with SessionLocal() as db:
@@ -78,7 +80,8 @@ async def test_seed_is_idempotent(_clean_masters: None) -> None:
     assert count == 11
 
 
-async def test_seed_creates_fl_contracts(_clean_masters: None) -> None:
+@pytest.mark.usefixtures("_clean_masters")
+async def test_seed_creates_fl_contracts() -> None:
     await seed()
     async with SessionLocal() as db:
         result = await db.execute(
@@ -88,7 +91,8 @@ async def test_seed_creates_fl_contracts(_clean_masters: None) -> None:
     assert fl_contract_count == 7
 
 
-async def test_seed_creates_md_coverage_rows(_clean_masters: None) -> None:
+@pytest.mark.usefixtures("_clean_masters")
+async def test_seed_creates_md_coverage_rows() -> None:
     await seed()
     async with SessionLocal() as db:
         coverage_count = len((await db.execute(select(SiteCoverage.id))).scalars().all())
@@ -96,12 +100,15 @@ async def test_seed_creates_md_coverage_rows(_clean_masters: None) -> None:
     assert coverage_count == 9
 
 
-async def test_seed_dedups_shared_md(_clean_masters: None) -> None:
+@pytest.mark.usefixtures("_clean_masters")
+async def test_seed_dedups_shared_md() -> None:
     """Dr. Manzoor Bevinal covers Bay, Doctors, and Huntsville — one Physician
     row should be created, not three."""
     await seed()
     async with SessionLocal() as db:
         bevinals = (
-            await db.execute(select(Physician.id).where(Physician.name == "Dr. Manzoor Bevinal"))
-        ).scalars().all()
+            (await db.execute(select(Physician.id).where(Physician.name == "Dr. Manzoor Bevinal")))
+            .scalars()
+            .all()
+        )
     assert len(bevinals) == 1
