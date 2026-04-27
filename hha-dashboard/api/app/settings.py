@@ -127,5 +127,22 @@ class Settings(BaseSettings):
             and self.paycom_client_secret
         )
 
+    # ---------- Application Insights / OpenTelemetry (T6) ----------
+    # When set, app/core/telemetry.py wires Azure Monitor OTel + FastAPI
+    # auto-instrumentation at lifespan startup. When empty, telemetry is a
+    # no-op and the api runs identically to today. The connection string
+    # contains an ingestion key (write-only); per Microsoft's own guidance
+    # it goes into App Service config as a regular setting, not a KV
+    # reference. Bicep `monitor.bicep` exposes the value as an output;
+    # `main.bicep` threads it into appservice.bicep when enable_monitor=true.
+    applicationinsights_connection_string: str = ""
+
+    @property
+    def telemetry_configured(self) -> bool:
+        """True when App Insights connection string is set. Symmetric with
+        email_configured / paycom_configured. Used for the startup banner
+        + the test-time short-circuit in core/telemetry.py."""
+        return bool(self.applicationinsights_connection_string)
+
 
 settings = Settings()

@@ -336,13 +336,31 @@ SELECT email, failed_attempts, locked_until FROM auth.census_credentials;
 
 **Symptoms:** `/health` is 200, `/ready` is 503, every API call returns 500.
 
-**Triage:**
+**First step — pin a correlation id.** Per audit ticket T6, every error
+response carries `correlation_id` in the JSON body AND `X-Correlation-Id`
+in the response header. Grab one from a real failing request, then:
+
+```kusto
+// Application Insights — Logs blade
+traces
+| where customDimensions.request_id == "<the correlation id>"
+| order by timestamp asc
+```
+
+That one query gives you the full request path: middleware logs, DB
+queries (auto-instrumented via SQLAlchemy), the exception, the response.
+This is the App Insights workflow Phase 2 unlocked. If `customDimensions`
+is empty, the api is running with `APPLICATIONINSIGHTS_CONNECTION_STRING`
+unset — fall back to the next step.
+
+**Fallback — App Service stdout:**
 
 ```bash
 az webapp log tail -n $API -g $RG | head -50
 ```
 
-Look at structlog output. Five common causes:
+Look at structlog output. Every record carries `request_id=<uuid>`
+(audit T6); grep that to filter to a single request. Five common causes:
 
 | Symptom in logs | Cause | Fix |
 |---|---|---|
@@ -351,6 +369,7 @@ Look at structlog output. Five common causes:
 | `KeyVault reference … did not resolve` | KV access policy or RBAC misconfigured | `az role assignment list --scope $(az keyvault show -n $KV --query id -o tsv)` — ensure App Service MI has `Key Vault Secrets User` |
 | `DATABASE_URL_SYNC not configured` (cron) | App settings missing | Re-run bootstrap.sh |
 | Random `RuntimeError: Refusing to start` | Missing `WEB_ORIGIN` or `entra_configured == False` in non-dev | Fix env vars, restart |
+| `telemetry.disabled` at startup | `APPLICATIONINSIGHTS_CONNECTION_STRING` was not threaded through | Confirm `enable_monitor=true` in bicepparam; redeploy main.bicep; restart api |
 
 ### D.4 "Alerts not firing / no email arriving"
 
