@@ -117,9 +117,10 @@ async def test_verify_valid_token_returns_claims(rsa_keypair) -> None:
 
     claims = await ej.verify_access_token(token)
 
-    assert claims["preferred_username"] == "alice@hha.com"
-    assert claims["aud"] == API_CLIENT_ID
-    assert claims["iss"] == ISSUER
+    assert isinstance(claims, ej.VerifiedClaims)
+    assert claims.preferred_username == "alice@hha.com"
+    assert claims.aud == API_CLIENT_ID
+    assert claims.iss == ISSUER
 
 
 @pytest.mark.asyncio
@@ -231,16 +232,94 @@ async def test_token_with_unknown_kid_raises_401(rsa_keypair) -> None:
 
 
 def test_extract_upn_falls_through_to_email() -> None:
-    claims = {"email": "x@hha.com"}
+    claims = ej.VerifiedClaims(email="x@hha.com")
     assert ej.extract_upn(claims) == "x@hha.com"
 
 
 def test_extract_upn_falls_through_to_oid() -> None:
-    claims = {"oid": "object-id-123"}
+    claims = ej.VerifiedClaims(oid="object-id-123")
     assert ej.extract_upn(claims) == "object-id-123"
 
 
 def test_extract_upn_raises_when_no_id_claim() -> None:
     with pytest.raises(HTTPException) as excinfo:
-        ej.extract_upn({})
+        ej.extract_upn(ej.VerifiedClaims())
     assert excinfo.value.status_code == 401
+
+
+# ---------- Type-shape validation (audit T7) ----------
+#
+# The audit's primary concern: a malformed `groups` claim (e.g. a single
+# string instead of a list) used to silently bypass role-map lookup
+# because `claims.get("groups") or []` accepts anything truthy. The new
+# Pydantic schema validates the shape upfront and raises 401 if the
+# token's payload is structurally weird.
+
+
+def test_verified_claims_rejects_groups_as_scalar() -> None:
+    """A 'groups' claim that's a single string instead of list[str] must
+    fail Pydantic validation, not silently coerce."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ej.VerifiedClaims.model_validate(
+            {"groups": "not-a-list-of-group-ids"}
+        )
+
+
+def test_verified_claims_rejects_groups_with_non_string_elements() -> None:
+    """A 'groups' claim mixing types must fail validation."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ej.VerifiedClaims.model_validate(
+            {"groups": [GROUP_OPS, 12345, None]}
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("configured_entra")
+async def test_verify_rejects_malformed_groups_claim_with_401(rsa_keypair) -> None:
+    """End-to-end: a JWT signed with an invalid 'groups' shape returns 401
+    rather than letting the token pass with an empty role set (which would
+    look identical to a legitimate user with no groups, masking the bug)."""
+    private_key, jwk = rsa_keypair
+    pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    now = int(time.time())
+    bad_claims = {
+        "aud": API_CLIENT_ID,
+        "iss": ISSUER,
+        "iat": now,
+        "nbf": now,
+        "exp": now + 3600,
+        "preferred_username": "alice@hha.com",
+        "groups": "not-a-list",  # malformed — a scalar where Pydantic expects list[str]
+    }
+    token = jwt.encode(bad_claims, pem, algorithm="RS256", headers={"kid": jwk["kid"]})
+
+    with pytest.raises(HTTPException) as excinfo:
+        await ej.verify_access_token(token)
+    assert excinfo.value.status_code == 401
+    assert "claim shape" in excinfo.value.detail.lower()
+
+
+def test_extract_roles_is_empty_for_claim_names_overage() -> None:
+    """If a user is in >150 groups, Entra returns `_claim_names` indirection
+    instead of a populated `groups` claim. We don't (currently) resolve the
+    Graph-API callback, so the user gets zero roles. Better than silently
+    granting partial access from a stale `groups` field that may not be
+    present."""
+    claims = ej.VerifiedClaims.model_validate(
+        {
+            "preferred_username": "exec-with-many-groups@hha.com",
+            "_claim_names": {"groups": "src1"},
+        }
+    )
+    # Ensure the model actually captured the indirection (private attr access
+    # via model_extra since Pydantic treats _-prefixed fields specially).
+    # The point of this test is that extract_roles returns set() not crash.
+    assert ej.extract_roles(claims) == set()
