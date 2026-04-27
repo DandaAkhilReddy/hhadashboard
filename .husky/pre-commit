@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+# Pre-commit hook — runs biome check --write on staged web/* files via
+# lint-staged. Audit ticket T3b. Defense in depth on top of .gitattributes:
+# the eol=lf setting prevents CRLF from being indexed; this hook makes
+# sure no biome lint violation lands either.
+#
+# Hook installation: web/package.json "prepare" script runs
+# `git config core.hooksPath .husky` on every npm install.
+
+set -e
+
+# Hook runs from git repo root. lint-staged is installed in web/.
+cd hha-dashboard/web
+npx --no-install lint-staged
