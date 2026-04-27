@@ -94,6 +94,39 @@ Generates a 24-byte postgres password, writes it to KV as `postgres-admin-passwo
 
 **Idempotent.** Re-run with the same vault is a no-op.
 
+#### Phase 2.5 — Seed `SESSION_SECRET` (web cookie encryption)
+
+The web App Service AES-GCM-encrypts the `hha_session` cookie with a 32-byte
+key. **Without this set, the web process refuses to boot** (per
+`web/instrumentation.ts`). Audit ticket T4.
+
+```bash
+ENV=dev
+KV_NAME=kv-hha-${ENV}
+WEB_APP=app-hha-web-${ENV}
+RG=rg-hha-dashboard-${ENV}
+
+# Generate + write to KV
+az keyvault secret set \
+  --vault-name $KV_NAME \
+  --name session-secret \
+  --value "$(openssl rand -base64 32)" \
+  --output none
+
+# Wire it into the web App Service as a KV reference
+az webapp config appsettings set \
+  -g $RG -n $WEB_APP \
+  --settings "SESSION_SECRET=@Microsoft.KeyVault(VaultName=${KV_NAME};SecretName=session-secret)" \
+  --output none
+
+# Restart so the new app_setting resolves
+az webapp restart -g $RG -n $WEB_APP
+```
+
+**Rotating** invalidates every active session (every user re-signs-in next
+visit). Treat as a credential — rotate after a known compromise, on a
+quarterly schedule otherwise.
+
 ### Phase 3 — Seed application data
 
 ```bash

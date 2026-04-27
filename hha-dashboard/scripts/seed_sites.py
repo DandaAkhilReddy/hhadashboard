@@ -3,7 +3,9 @@
 Usage (from api/ directory):
     uv run python ../scripts/seed_sites.py
 
-Idempotent — skips seeding if sites already exist.
+Idempotent. Safe to re-run; converges to the canonical 11 sites + FL contracts
++ MDs + coverage assignments. Does NOT delete unknown rows (e.g. a stray test
+row gets left alone — operator removes manually).
 """
 
 from __future__ import annotations
@@ -13,24 +15,25 @@ import sys
 from datetime import date
 from pathlib import Path
 
-# Add api/ to path so `from app...` works when running from scripts/
 API_DIR = Path(__file__).resolve().parent.parent / "api"
 sys.path.insert(0, str(API_DIR))
 
 from sqlalchemy import select  # noqa: E402
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
 
 from app.models.masters import (  # noqa: E402
     Contract,
+    CoverageRole,
     Physician,
     PhysicianStatus,
     Site,
     SiteCoverage,
+    SiteStatus,
 )
 from app.settings import settings  # noqa: E402
 
 
-FL_SITES = [
+FL_SITES: list[dict] = [
     {
         "name": "Westside Regional",
         "state": "FL",
@@ -89,7 +92,7 @@ FL_SITES = [
     },
 ]
 
-TX_SITES = [
+TX_SITES: list[dict] = [
     {
         "name": "Bay",
         "state": "TX",
@@ -117,66 +120,121 @@ TX_SITES = [
 ]
 
 
+async def _ensure_site(db: AsyncSession, spec: dict) -> Site:
+    """Return existing Site by name, or create if absent."""
+    existing = await db.scalar(select(Site).where(Site.name == spec["name"]))
+    if existing is not None:
+        return existing
+    site = Site(name=spec["name"], state=spec["state"], status=SiteStatus.ACTIVE.value)
+    db.add(site)
+    await db.flush()
+    return site
+
+
+async def _ensure_contract(db: AsyncSession, site_id: int, spec: dict) -> None:
+    """Insert a Contract row for site_id if no contract for that site exists."""
+    existing = await db.scalar(select(Contract).where(Contract.site_id == site_id))
+    if existing is not None:
+        return
+    db.add(
+        Contract(
+            site_id=site_id,
+            start_date=date(2024, 1, 1),
+            end_date=spec["contract_end"],
+            annual_subsidy_usd=spec["subsidy"],
+        )
+    )
+
+
+async def _ensure_physician(db: AsyncSession, name: str, status: str) -> Physician:
+    """Return existing Physician by name, or create if absent."""
+    existing = await db.scalar(select(Physician).where(Physician.name == name))
+    if existing is not None:
+        return existing
+    phys = Physician(name=name, current_status=status)
+    db.add(phys)
+    await db.flush()
+    return phys
+
+
+async def _ensure_coverage(
+    db: AsyncSession, site_id: int, physician_id: int
+) -> None:
+    """Insert SiteCoverage row for (site, physician, MEDICAL_DIRECTOR) if absent."""
+    existing = await db.scalar(
+        select(SiteCoverage).where(
+            SiteCoverage.site_id == site_id,
+            SiteCoverage.physician_id == physician_id,
+            SiteCoverage.role == CoverageRole.MEDICAL_DIRECTOR.value,
+        )
+    )
+    if existing is not None:
+        return
+    db.add(
+        SiteCoverage(
+            site_id=site_id,
+            physician_id=physician_id,
+            role=CoverageRole.MEDICAL_DIRECTOR.value,
+            start_date=date(2024, 1, 1),
+        )
+    )
+
+
 async def seed() -> None:
     engine = create_async_engine(settings.database_url)
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
     async with SessionLocal() as db:
-        existing = (await db.execute(select(Site.id))).scalars().all()
-        if existing:
-            print(f"[seed] {len(existing)} sites already exist — skipping.")
-            await engine.dispose()
-            return
+        all_specs = FL_SITES + TX_SITES
+        sites_inserted = 0
+        contracts_inserted = 0
+        mds_inserted = 0
+        coverage_inserted = 0
 
-        print("[seed] Inserting sites...")
-        all_site_specs = FL_SITES + TX_SITES
-        for spec in all_site_specs:
-            db.add(Site(name=spec["name"], state=spec["state"], status="ACTIVE"))
-        await db.flush()
-
-        sites_by_name = {
-            site.name: site for site in (await db.execute(select(Site))).scalars()
-        }
-
-        print(f"[seed] Inserting contracts for {len(FL_SITES)} FL sites...")
-        for spec in FL_SITES:
-            db.add(
-                Contract(
-                    site_id=sites_by_name[spec["name"]].id,
-                    start_date=date(2024, 1, 1),
-                    end_date=spec["contract_end"],
-                    annual_subsidy_usd=spec["subsidy"],
-                )
+        for spec in all_specs:
+            before_site = await db.scalar(
+                select(Site.id).where(Site.name == spec["name"])
             )
+            site = await _ensure_site(db, spec)
+            if before_site is None:
+                sites_inserted += 1
 
-        print("[seed] Inserting physicians (MDs only; full roster comes from Paycom in P1)...")
-        md_by_name: dict[str, Physician] = {}
-        for spec in all_site_specs:
-            md_name = spec["md"]
-            if md_name and md_name not in md_by_name:
-                phys = Physician(name=md_name, current_status=spec["md_status"])
-                db.add(phys)
-                md_by_name[md_name] = phys
-        await db.flush()
+            if spec["state"] == "FL":
+                before_contract = await db.scalar(
+                    select(Contract.id).where(Contract.site_id == site.id)
+                )
+                await _ensure_contract(db, site.id, spec)
+                if before_contract is None:
+                    contracts_inserted += 1
 
-        print("[seed] Inserting site_coverage (MD assignments)...")
-        for spec in all_site_specs:
             if spec["md"]:
-                phys = md_by_name[spec["md"]]
-                site = sites_by_name[spec["name"]]
-                db.add(
-                    SiteCoverage(
-                        site_id=site.id,
-                        physician_id=phys.id,
-                        role="MEDICAL_DIRECTOR",
-                        start_date=date(2024, 1, 1),
+                before_md = await db.scalar(
+                    select(Physician.id).where(Physician.name == spec["md"])
+                )
+                phys = await _ensure_physician(db, spec["md"], spec["md_status"])
+                if before_md is None:
+                    mds_inserted += 1
+
+                before_cov = await db.scalar(
+                    select(SiteCoverage.id).where(
+                        SiteCoverage.site_id == site.id,
+                        SiteCoverage.physician_id == phys.id,
+                        SiteCoverage.role == CoverageRole.MEDICAL_DIRECTOR.value,
                     )
                 )
+                await _ensure_coverage(db, site.id, phys.id)
+                if before_cov is None:
+                    coverage_inserted += 1
 
         await db.commit()
+
+        total_sites = await db.scalar(select(Site.id).order_by(Site.id.desc()))
+        total_count = len((await db.execute(select(Site.id))).scalars().all())
+
         print(
-            f"[seed] ✓ Done: {len(all_site_specs)} sites, {len(FL_SITES)} FL contracts, "
-            f"{len(md_by_name)} MDs, {sum(1 for s in all_site_specs if s['md'])} coverage rows."
+            f"[seed] +{sites_inserted} sites, +{contracts_inserted} contracts, "
+            f"+{mds_inserted} MDs, +{coverage_inserted} coverage rows. "
+            f"DB now has {total_count} total sites."
         )
 
     await engine.dispose()

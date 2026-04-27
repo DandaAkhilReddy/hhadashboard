@@ -1,0 +1,58 @@
+# Enforce LF on every text file regardless of contributor OS.
+#
+# Why: Windows + OneDrive contributors (this repo's primary author) keep
+# committing CRLF, which then fails biome lint and blocks CI. With
+# `text=auto eol=lf` git normalizes to LF on commit AND on checkout, so
+# the working tree stays LF on every platform.
+#
+# Audit ticket T3 (see hha-dashboard/docs/PROJECT_STATE_AUDIT.md § 17).
+
+* text=auto eol=lf
+
+# Source code (explicit, even though * covers it — defensive)
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.py text eol=lf
+*.pyi text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.bicep text eol=lf
+*.bicepparam text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.scss text eol=lf
+*.sql text eol=lf
+
+# Lockfiles must be LF (npm + uv hash them)
+package-lock.json text eol=lf
+uv.lock text eol=lf
+
+# Binary assets — never normalize
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.svg text eol=lf
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.zip binary
+*.tar binary
+*.tar.gz binary
+*.gz binary
+
+# Generated types — committed but never hand-edited
+hha-dashboard/web/lib/api-types.ts linguist-generated=true

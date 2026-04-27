@@ -1,10 +1,11 @@
 import { Badge } from "@/components/Badge";
 import { Card, CardHeader } from "@/components/Card";
-import { CensusTrendChart, buildTrendPoints } from "@/components/CensusTrendChart";
+import { CensusTrendChart } from "@/components/CensusTrendChart";
 import { MetricCard } from "@/components/MetricCard";
 import { PageHeader } from "@/components/PageHeader";
 import { api } from "@/lib/api-client";
 import { dateShort, num, pct, signed, usd } from "@/lib/format";
+import { buildTrendPoints } from "@/lib/trend-points";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SiteCensusForm } from "./SiteCensusForm";

@@ -17,20 +17,12 @@ export default async function OperationsPage() {
         title="Operations Board"
         subtitle="11 sites · FL (7) + TX (4) · Daily census, coverage, contracts"
         right={
-          <>
-            <button
-              type="button"
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              Export CSV
-            </button>
-            <button
-              type="button"
-              className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
-            >
-              + Enter Today&apos;s Data
-            </button>
-          </>
+          <Link
+            href="/daily-census"
+            className="rounded-md bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-slate-800"
+          >
+            + Enter Today&apos;s Data
+          </Link>
         }
       />
 
@@ -66,25 +58,33 @@ export default async function OperationsPage() {
       </div>
 
       <Card className="mb-6">
-        <CardHeader title="Florida Sites — Daily Detail" owner="Crystal Anderson" />
+        <CardHeader
+          title="Florida Sites — Daily Detail"
+          owner="Crystal Anderson · owner_ops"
+          right={
+            <Badge variant="blue" dot>
+              {fl.length} sites
+            </Badge>
+          }
+        />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-wider text-slate-500">
-                <th className="py-2 font-semibold">Site</th>
-                <th className="py-2 font-semibold">Medical Director</th>
-                <th className="py-2 font-semibold">Liaison</th>
-                <th className="py-2 text-center font-semibold">Census</th>
-                <th className="py-2 text-center font-semibold">3-Mo</th>
-                <th className="py-2 text-center font-semibold">MTD</th>
-                <th className="py-2 text-center font-semibold">Var</th>
-                <th className="py-2 text-center font-semibold">Open Shifts</th>
-                <th className="py-2 font-semibold">Contract Thru</th>
-                <th className="py-2 font-semibold">Subsidy</th>
-                <th className="py-2 font-semibold">Status</th>
+            <thead className="bg-slate-50">
+              <tr className="text-left text-[10.5px] uppercase tracking-wider text-slate-500">
+                <th className="rounded-l-md px-3 py-2.5 font-semibold">Site</th>
+                <th className="px-3 py-2.5 font-semibold">Medical Director</th>
+                <th className="px-3 py-2.5 font-semibold">Liaison</th>
+                <th className="px-3 py-2.5 text-center font-semibold">Census</th>
+                <th className="px-3 py-2.5 text-center font-semibold">3-Mo</th>
+                <th className="px-3 py-2.5 text-center font-semibold">MTD</th>
+                <th className="px-3 py-2.5 text-center font-semibold">Var</th>
+                <th className="px-3 py-2.5 text-center font-semibold">Open Shifts</th>
+                <th className="px-3 py-2.5 font-semibold">Contract Thru</th>
+                <th className="px-3 py-2.5 font-semibold">Subsidy</th>
+                <th className="rounded-r-md px-3 py-2.5 font-semibold">Status</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {fl.map((s) => {
                 const tone =
                   s.variance_pct < -15
@@ -99,57 +99,67 @@ export default async function OperationsPage() {
                       ? "text-red-600"
                       : "text-amber-600";
                 return (
-                  <tr
-                    key={s.name}
-                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
-                  >
-                    <td className="py-2.5 font-semibold text-slate-900">
+                  <tr key={s.name} className="group transition-colors hover:bg-indigo-50/40">
+                    <td className="px-3 py-3 font-semibold text-slate-900">
                       <Link
                         href={`/operations/${s.id}`}
-                        className="hover:text-indigo-600 hover:underline"
+                        className="inline-flex items-center gap-1 transition-colors hover:text-indigo-600"
                       >
                         {s.name}
+                        <span className="opacity-0 transition-opacity group-hover:opacity-60">
+                          →
+                        </span>
                       </Link>
                     </td>
-                    <td className="py-2.5 text-xs">
+                    <td className="px-3 py-3 text-xs">
                       {s.medical_director ? (
                         <span className="text-slate-700">
                           {s.medical_director}
                           {s.md_status === "PIP" ? (
-                            <span className="ml-1 text-red-600">(PIP)</span>
+                            <span className="ml-1 font-semibold text-red-600">(PIP)</span>
                           ) : null}
                         </span>
                       ) : (
                         <span className="font-semibold text-red-600">VACANT</span>
                       )}
                     </td>
-                    <td className="py-2.5 text-xs text-slate-500">{s.liaison ?? "—"}</td>
-                    <td className={`py-2.5 text-center font-bold tabular-nums ${tone}`}>
+                    <td className="px-3 py-3 text-xs text-slate-500">{s.liaison ?? "—"}</td>
+                    <td
+                      className={`px-3 py-3 text-center text-base font-bold tabular-nums ${tone}`}
+                    >
                       {s.census_today}
                     </td>
-                    <td className="py-2.5 text-center tabular-nums text-slate-500">
+                    <td className="px-3 py-3 text-center tabular-nums text-slate-500">
                       {s.census_3mo_avg}
                     </td>
-                    <td className="py-2.5 text-center tabular-nums text-slate-400">
+                    <td className="px-3 py-3 text-center tabular-nums text-slate-400">
                       {s.mtd_avg.toFixed(1)}
                     </td>
-                    <td className={`py-2.5 text-center tabular-nums ${tone}`}>
+                    <td className={`px-3 py-3 text-center font-semibold tabular-nums ${tone}`}>
                       {pct(s.variance_pct)}
                     </td>
-                    <td className={`py-2.5 text-center font-bold tabular-nums ${shiftsTone}`}>
+                    <td className={`px-3 py-3 text-center font-bold tabular-nums ${shiftsTone}`}>
                       {s.open_shifts}
                     </td>
-                    <td className="py-2.5 text-xs text-slate-500">{dateShort(s.contract_end)}</td>
-                    <td className="py-2.5 text-xs text-slate-500">
+                    <td className="px-3 py-3 text-xs text-slate-500 tabular-nums">
+                      {dateShort(s.contract_end)}
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-slate-600 tabular-nums">
                       {usd(s.annual_subsidy_usd, true)}
                     </td>
-                    <td className="py-2.5">
+                    <td className="px-3 py-3">
                       {s.md_status === "VACANT" ? (
-                        <Badge variant="bad">VACANT ⚠</Badge>
+                        <Badge variant="bad" dot>
+                          VACANT
+                        </Badge>
                       ) : s.md_status === "PIP" ? (
-                        <Badge variant="bad">PIP Active</Badge>
+                        <Badge variant="warn" dot>
+                          PIP
+                        </Badge>
                       ) : (
-                        <Badge variant="good">Active</Badge>
+                        <Badge variant="good" dot>
+                          Active
+                        </Badge>
                       )}
                     </td>
                   </tr>
@@ -161,42 +171,54 @@ export default async function OperationsPage() {
       </Card>
 
       <Card>
-        <CardHeader title="Texas Sites" owner="Dr. Veena Reddy" />
+        <CardHeader
+          title="Texas Sites"
+          owner="Dr. Veena Reddy · owner_clinical"
+          right={
+            <Badge variant="blue" dot>
+              {tx.length} sites
+            </Badge>
+          }
+        />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-[11px] uppercase tracking-wider text-slate-500">
-                <th className="py-2 font-semibold">Site</th>
-                <th className="py-2 font-semibold">Medical Director</th>
-                <th className="py-2 font-semibold">Liaison</th>
-                <th className="py-2 text-center font-semibold">Census</th>
-                <th className="py-2 font-semibold">Status</th>
+            <thead className="bg-slate-50">
+              <tr className="text-left text-[10.5px] uppercase tracking-wider text-slate-500">
+                <th className="rounded-l-md px-3 py-2.5 font-semibold">Site</th>
+                <th className="px-3 py-2.5 font-semibold">Medical Director</th>
+                <th className="px-3 py-2.5 font-semibold">Liaison</th>
+                <th className="px-3 py-2.5 text-center font-semibold">Census</th>
+                <th className="rounded-r-md px-3 py-2.5 font-semibold">Status</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {tx.map((s) => (
-                <tr
-                  key={s.name}
-                  className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
-                >
-                  <td className="py-2.5 font-semibold text-slate-900">
+                <tr key={s.name} className="group transition-colors hover:bg-indigo-50/40">
+                  <td className="px-3 py-3 font-semibold text-slate-900">
                     <Link
                       href={`/operations/${s.id}`}
-                      className="hover:text-indigo-600 hover:underline"
+                      className="inline-flex items-center gap-1 transition-colors hover:text-indigo-600"
                     >
                       {s.name}
+                      <span className="opacity-0 transition-opacity group-hover:opacity-60">→</span>
                     </Link>
                   </td>
-                  <td className="py-2.5 text-xs text-slate-700">
+                  <td className="px-3 py-3 text-xs text-slate-700">
                     {s.medical_director ?? <span className="text-slate-400">—</span>}
                   </td>
-                  <td className="py-2.5 text-xs text-slate-500">{s.liaison ?? "—"}</td>
-                  <td className="py-2.5 text-center font-bold tabular-nums">{s.census_today}</td>
-                  <td className="py-2.5">
+                  <td className="px-3 py-3 text-xs text-slate-500">{s.liaison ?? "—"}</td>
+                  <td className="px-3 py-3 text-center text-base font-bold tabular-nums">
+                    {s.census_today}
+                  </td>
+                  <td className="px-3 py-3">
                     {s.md_status === "VACANT" ? (
-                      <Badge variant="gray">No MD</Badge>
+                      <Badge variant="gray" dot>
+                        No MD
+                      </Badge>
                     ) : (
-                      <Badge variant="blue">Active</Badge>
+                      <Badge variant="good" dot>
+                        Active
+                      </Badge>
                     )}
                   </td>
                 </tr>
