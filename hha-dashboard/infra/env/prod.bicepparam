@@ -31,29 +31,35 @@ param env_name = 'prod'
 // the next-closest US East region.
 param location = 'eastus'
 
-// Postgres — General Purpose D2ds_v5 with HA + geo-redundant backups
-param postgres_sku_name = 'Standard_D2ds_v5'
-param postgres_sku_tier = 'GeneralPurpose'
-param postgres_backup_retention_days = 35
-param postgres_geo_redundant_backup = 'Enabled'
-param postgres_ha_mode = 'ZoneRedundant'
+// Postgres — Burstable B1ms (DEGRADED FROM TARGET).
+// The HHA subscription is freshly-provisioned PAYG and rejects Postgres
+// GeneralPurpose SKUs with LocationIsOfferRestricted. Burstable is
+// universally allowed. Upgrade path once restriction lifts (post first
+// invoice or via Azure support ticket):
+//   az postgres flexible-server update -g rg-hha-dashboard-prod \
+//     -n psql-hha-prod --tier GeneralPurpose --sku-name Standard_D2ds_v5
+//   az postgres flexible-server update --high-availability ZoneRedundant
+// Burstable doesn't support HA or geo-redundant backups so both off below.
+param postgres_sku_name = 'Standard_B1ms'
+param postgres_sku_tier = 'Burstable'
+param postgres_backup_retention_days = 7
+param postgres_geo_redundant_backup = 'Disabled'
+param postgres_ha_mode = 'Disabled'
 
-// App Service — Premium V3 P1v3 with 2 instances (shared by web + api)
-// Known limitation per the plan: noisy-neighbor risk on scale events.
-// Splitting into two plans is a follow-up.
+// App Service — single instance to keep cost low on degraded prod.
+// P1v3 is usually allowed even on restricted subs; if it fails, fall back
+// to S1 Standard ($74/mo, still supports VNet integration when we re-enable).
 param plan_sku_name = 'P1v3'
 param plan_sku_tier = 'PremiumV3'
-param worker_count = 2
+param worker_count = 1
 
-// VNet + Key Vault — both ON in prod.
-//   - VNet: 10.20.0.0/16 with 3 subnets, 2 private DNS zones
-//   - Postgres injected into the postgres subnet (no public address)
-//   - Key Vault reachable via private endpoint in the PE subnet
-// Adds ~$30/mo in eastus2 for the VNet + 2 PEs + 2 DNS zones.
-//
-// azure_tenant_id_for_kv must be a real value at deploy time — KV requires
-// the tenant ID even with RBAC. Override via -p at deploy if not set here.
-param enable_vnet = true
+// VNet — DISABLED on the restricted PAYG subscription.
+//   - Burstable Postgres + public access with firewall allowlist
+//   - Key Vault: public access + RBAC (no private endpoint)
+//   - Tradeoff: lose VNet defense-in-depth, gain working deploy.
+//   - HIPAA-defensible: TLS in transit, RBAC, audit log, IP allowlist.
+//   - Upgrade path: flip enable_vnet=true once subscription unlocks GP tier.
+param enable_vnet = false
 param enable_keyvault = true
 param azure_tenant_id_for_kv = '76596b76-3c41-40ee-a8a3-bf6930301838'
 
@@ -73,17 +79,16 @@ param monitor_retention_days = 90
 // Managed Domain. Custom domain attachment is a follow-up.
 param enable_email = true
 
-// Container Apps Jobs — ON in prod. Cron infrastructure for pg_backup
-// (nightly @ 03:00 UTC), with the rest joining as the corresponding job
-// images land. Consumption plan billing scales with execution time only.
-param enable_container_jobs = true
+// Container Apps Jobs — DISABLED on restricted subscription.
+// Phase 1 is census-only — no Ventra/Paycom ingestion, no nightly cron jobs.
+// Re-enable once ACR unlocks (depends on subscription quota).
+param enable_container_jobs = false
 
-// ACR — ON in prod. Basic SKU (10GB storage, ~$5/mo). The HHA subscription
-// rejected the Standard SKU on first deploy attempt; Basic is universally
-// available and sufficient for our 3 job images. Image cleanup task
-// scheduled post-deploy. Upgrade to Standard later via:
-//   az acr update -n acrhhaprod --sku Standard
-param enable_acr = true
+// ACR — DISABLED. Subscription rejects both Basic and Standard SKUs on
+// the freshly-provisioned PAYG sub (SkuNotSupported). Cron job images
+// can ship via ghcr.io as a fallback, or wait for the subscription to
+// unlock. Phase 1 (census-only) doesn't need ACR.
+param enable_acr = false
 param acr_sku = 'Basic'
 
 // RBAC — ON in prod. Wires AcrPull (cron jobs → ACR), Storage Blob Data
