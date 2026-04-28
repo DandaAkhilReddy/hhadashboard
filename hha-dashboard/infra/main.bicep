@@ -27,6 +27,9 @@ targetScope = 'resourceGroup'
 @allowed(['dev', 'prod'])
 param env_name string
 
+@description('Optional Key Vault name suffix. Empty → "kv-hha-{env}". Use a short suffix like "1" when a prior KV with the same name is soft-deleted with purge protection (90-day reservation).')
+param kv_name_suffix string = ''
+
 @description('Azure region. Picked for Postgres Flex SKU coverage and 3-AZ availability.')
 param location string = 'eastus2'
 
@@ -161,7 +164,7 @@ var web_name = 'app-hha-web-${env_name}'
 var api_name = 'app-hha-api-${env_name}'
 var database_name = 'hha_dashboard'
 var vnet_name = 'vnet-hha-${env_name}'
-var kv_name = 'kv-hha-${env_name}'
+var kv_name = 'kv-hha-${env_name}${kv_name_suffix}'
 var log_analytics_name = 'log-hha-${env_name}'
 var app_insights_name = 'appi-hha-${env_name}'
 var acs_name = 'acs-hha-${env_name}'

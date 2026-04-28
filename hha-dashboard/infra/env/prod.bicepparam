@@ -25,6 +25,12 @@ param postgres_admin_password = '__OVERRIDE_AT_DEPLOY_TIME__'
 param deployer_workstation_ip = '162.227.196.122'
 
 param env_name = 'prod'
+
+// Suffix added to KV name. The first prod attempt's `kv-hha-prod` is now
+// soft-deleted with purge protection enabled (cannot be purged for 90 days).
+// Use a different name on retry; future deploys reuse this one.
+param kv_name_suffix = '1'
+
 // Region: eastus (not eastus2). The HHA subscription has provisioning
 // restrictions in eastus2 — Postgres Flex returns LocationIsOfferRestricted
 // and ACR rejects the Standard SKU. eastus is universally enabled and is
