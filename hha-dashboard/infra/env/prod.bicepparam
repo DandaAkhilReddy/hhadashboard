@@ -25,7 +25,11 @@ param postgres_admin_password = '__OVERRIDE_AT_DEPLOY_TIME__'
 param deployer_workstation_ip = '162.227.196.122'
 
 param env_name = 'prod'
-param location = 'eastus2'
+// Region: eastus (not eastus2). The HHA subscription has provisioning
+// restrictions in eastus2 — Postgres Flex returns LocationIsOfferRestricted
+// and ACR rejects the Standard SKU. eastus is universally enabled and is
+// the next-closest US East region.
+param location = 'eastus'
 
 // Postgres — General Purpose D2ds_v5 with HA + geo-redundant backups
 param postgres_sku_name = 'Standard_D2ds_v5'
@@ -74,11 +78,13 @@ param enable_email = true
 // images land. Consumption plan billing scales with execution time only.
 param enable_container_jobs = true
 
-// ACR — ON in prod. Standard SKU gives 100GB storage + replication option
-// at $20/mo. Premium ($100+/mo) only needed for content trust signing or
-// VNet-private ACR. Image cleanup task scheduled post-deploy.
+// ACR — ON in prod. Basic SKU (10GB storage, ~$5/mo). The HHA subscription
+// rejected the Standard SKU on first deploy attempt; Basic is universally
+// available and sufficient for our 3 job images. Image cleanup task
+// scheduled post-deploy. Upgrade to Standard later via:
+//   az acr update -n acrhhaprod --sku Standard
 param enable_acr = true
-param acr_sku = 'Standard'
+param acr_sku = 'Basic'
 
 // RBAC — ON in prod. Wires AcrPull (cron jobs → ACR), Storage Blob Data
 // Contributor (pg_backup → backups/), and ACS Contributor (alert_digest +
