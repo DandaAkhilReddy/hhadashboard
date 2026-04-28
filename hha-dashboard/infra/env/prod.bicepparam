@@ -46,11 +46,15 @@ param postgres_backup_retention_days = 7
 param postgres_geo_redundant_backup = 'Disabled'
 param postgres_ha_mode = 'Disabled'
 
-// App Service — single instance to keep cost low on degraded prod.
-// P1v3 is usually allowed even on restricted subs; if it fails, fall back
-// to S1 Standard ($74/mo, still supports VNet integration when we re-enable).
-param plan_sku_name = 'P1v3'
-param plan_sku_tier = 'PremiumV3'
+// App Service — B1 Basic for 20-user prod. Right-sized: ~$13/mo vs $155
+// for P1v3. Shared CPU is fine for 20 exec users on a read-heavy dashboard.
+// Upgrade path when traffic grows or VNet re-enables:
+//   az appservice plan update -g rg-hha-dashboard-prod -n asp-hha-prod \
+//     --sku P1v3
+// Note: B1 doesn't support VNet integration. With enable_vnet=false anyway
+// (Postgres on Burstable + public-with-firewall), there's no functional loss.
+param plan_sku_name = 'B1'
+param plan_sku_tier = 'Basic'
 param worker_count = 1
 
 // VNet — DISABLED on the restricted PAYG subscription.
@@ -63,12 +67,13 @@ param enable_vnet = false
 param enable_keyvault = true
 param azure_tenant_id_for_kv = '76596b76-3c41-40ee-a8a3-bf6930301838'
 
-// Storage — ON in prod. Standard_RAGRS for cross-region read-access on
-// backups (the LRS variant works but loses the regional-failover read
-// path). Soft-delete 90 days for HIPAA-friendlier retention. Adds about
-// $10/mo for the account (much less if backups < 100 GB).
+// Storage — LRS (locally redundant) for ~$5/mo solo prod. Backups stay
+// in 1 region; HIPAA doesn't require cross-region. Soft-delete 90 days
+// for accidental-delete recovery. Upgrade to RAGRS if cross-region read
+// access becomes a requirement (~$5/mo more):
+//   az storage account update -n sthhaprod... --sku Standard_RAGRS
 param enable_storage = true
-param storage_sku = 'Standard_RAGRS'
+param storage_sku = 'Standard_LRS'
 param storage_soft_delete_retention_days = 90
 
 // Monitor — ON in prod. Required for HIPAA audit chain.
