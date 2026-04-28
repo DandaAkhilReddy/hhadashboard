@@ -81,27 +81,35 @@ jobs:
       - name: Build api zip
         working-directory: hha-dashboard/api
         run: |
-          # Build the venv with all deps; ship it whole so App Service has
-          # everything pre-installed (no cold-start `uv sync`, no PATH
-          # surprises, no Oryx auto-build dependency).
-          uv sync --frozen --no-dev
+          # Generate requirements.txt from uv.lock so App Service's Oryx
+          # build can pip-install during deploy (canonical Python on Linux
+          # path). Shipping a runner-built .venv is brittle because venv
+          # symlinks point to runner paths that don't exist on App Service.
+          uv export --frozen --no-dev --format requirements-txt > requirements.txt
           mkdir -p ../../api-deploy
-          cp -r app alembic alembic.ini pyproject.toml uv.lock .venv ../../api-deploy/
+          cp -r app alembic alembic.ini pyproject.toml uv.lock requirements.txt ../../api-deploy/
           cp -r ../scripts ../../api-deploy/scripts
-          # Startup invokes binaries directly out of the shipped .venv —
-          # bypasses Oryx, no `uv run`, no pip install at runtime.
+          # Oryx installs requirements.txt during zip-deploy with
+          # SCM_DO_BUILD_DURING_DEPLOYMENT=true (set as App Service config).
+          # Startup uses system python + the installed deps directly.
           cat > ../../api-deploy/startup.sh <<'STARTUP'
           #!/bin/bash
           set -e
           cd /home/site/wwwroot
-          # Apply migrations on every startup (idempotent). Failure is logged
-          # but doesn't block uvicorn — startup must succeed even if DB is
-          # transiently unreachable so platform health probes can pass.
-          .venv/bin/alembic upgrade head || echo "Migration step skipped/failed; check logs"
-          exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+          # Apply migrations on every startup (idempotent).
+          python -m alembic upgrade head || echo "Migration step skipped/failed; check logs"
+          exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
           STARTUP
           chmod +x ../../api-deploy/startup.sh
           cd ../../api-deploy && zip -qr ../api-deploy.zip . && ls -lh ../api-deploy.zip
+
+      - name: Enable Oryx build on api App Service
+        run: |
+          # SCM_DO_BUILD_DURING_DEPLOYMENT triggers Oryx pip install during
+          # zip-deploy (reads requirements.txt at zip root).
+          az webapp config appsettings set \
+            -g rg-hha-dashboard-prod -n app-hha-api-prod \
+            --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true ENABLE_ORYX_BUILD=true
 
       - name: Deploy api zip to App Service
         uses: azure/webapps-deploy@v3
@@ -154,10 +162,9 @@ jobs:
         run: |
           npm ci
           npm run build
-          # Drop devDependencies — Next.js standalone runtime only needs
-          # production deps, and the unpruned tree is ~500MB which slows
-          # zip / upload / extract.
-          npm prune --omit=dev
+          # NOTE: don't prune devDependencies. Next.js's `next start` requires
+          # some packages that npm marks devDependencies (typescript, swc
+          # transitive deps, etc.). Pruning breaks the runtime CLI.
 
       - name: Stage web zip
         working-directory: hha-dashboard/web
