@@ -31,11 +31,11 @@ param env_name = 'prod'
 // Use a different name on retry; future deploys reuse this one.
 param kv_name_suffix = '1'
 
-// Region: eastus (not eastus2). The HHA subscription has provisioning
-// restrictions in eastus2 — Postgres Flex returns LocationIsOfferRestricted
-// and ACR rejects the Standard SKU. eastus is universally enabled and is
-// the next-closest US East region.
-param location = 'eastus'
+// Region: centralus. The HHA subscription's Postgres Flex offer is
+// restricted in both eastus and eastus2. centralus has historically been
+// the most permissive US region for new PAYG subs. If this fails too,
+// fall back to westus2 or westus3.
+param location = 'centralus'
 
 // Postgres — Burstable B1ms (DEGRADED FROM TARGET).
 // The HHA subscription is freshly-provisioned PAYG and rejects Postgres
