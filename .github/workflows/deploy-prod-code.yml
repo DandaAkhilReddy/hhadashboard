@@ -81,33 +81,27 @@ jobs:
       - name: Build api zip
         working-directory: hha-dashboard/api
         run: |
+          # Build the venv with all deps; ship it whole so App Service has
+          # everything pre-installed (no cold-start `uv sync`, no PATH
+          # surprises, no Oryx auto-build dependency).
           uv sync --frozen --no-dev
-          # Stage everything we ship: app/, alembic/, alembic.ini, pyproject.toml,
-          # uv.lock, the resolved .venv site-packages (App Service Linux Python
-          # runtime expects 'site-packages' at the wwwroot)
           mkdir -p ../../api-deploy
-          cp -r app alembic alembic.ini pyproject.toml uv.lock ../../api-deploy/
-          # Ship the seed scripts too — migrate-prod.yml and seed-prod.yml
-          # invoke them via Kudu against /home/site/wwwroot/scripts.
+          cp -r app alembic alembic.ini pyproject.toml uv.lock .venv ../../api-deploy/
           cp -r ../scripts ../../api-deploy/scripts
-          # The App Service "Oryx build" path: pin a startup command that uvicorn-runs
-          # the app. uv is not pre-installed on App Service Linux Python, so we
-          # bootstrap it on the first request (idempotent — pip install is no-op
-          # if already present).
+          # Startup invokes binaries directly out of the shipped .venv —
+          # bypasses Oryx, no `uv run`, no pip install at runtime.
           cat > ../../api-deploy/startup.sh <<'STARTUP'
           #!/bin/bash
           set -e
           cd /home/site/wwwroot
-          # Bootstrap uv (not on the base image)
-          command -v uv >/dev/null 2>&1 || pip install --quiet uv
-          # Apply migrations on every startup (idempotent; safe). Comment out if
-          # you'd rather use migrate-prod.yml exclusively.
-          uv run alembic upgrade head || echo "Migration step skipped/failed; check logs"
-          exec uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+          # Apply migrations on every startup (idempotent). Failure is logged
+          # but doesn't block uvicorn — startup must succeed even if DB is
+          # transiently unreachable so platform health probes can pass.
+          .venv/bin/alembic upgrade head || echo "Migration step skipped/failed; check logs"
+          exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
           STARTUP
           chmod +x ../../api-deploy/startup.sh
-          cd ../../api-deploy && zip -r ../api-deploy.zip . > /dev/null
-          ls -lh ../api-deploy.zip
+          cd ../../api-deploy && zip -qr ../api-deploy.zip . && ls -lh ../api-deploy.zip
 
       - name: Deploy api zip to App Service
         uses: azure/webapps-deploy@v3
@@ -160,12 +154,23 @@ jobs:
         run: |
           npm ci
           npm run build
+          # Drop devDependencies — Next.js standalone runtime only needs
+          # production deps, and the unpruned tree is ~500MB which slows
+          # zip / upload / extract.
+          npm prune --omit=dev
 
       - name: Stage web zip
         working-directory: hha-dashboard/web
         run: |
           mkdir -p ../../web-deploy
           cp -r .next package.json package-lock.json node_modules public ../../web-deploy/ || true
+          cat > ../../web-deploy/startup.sh <<'STARTUP'
+          #!/bin/bash
+          set -e
+          cd /home/site/wwwroot
+          exec npm run start
+          STARTUP
+          chmod +x ../../web-deploy/startup.sh
           cd ../../web-deploy && zip -qr ../web-deploy.zip . && ls -lh ../web-deploy.zip
 
       - name: Deploy web zip to App Service

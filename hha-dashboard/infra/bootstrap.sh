@@ -68,7 +68,7 @@ if ! az group show -n "$RG" >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! az keyvault show -n "$VAULT" >/dev/null 2>&1; then
+if ! az keyvault show -n "$VAULT" -g "$RG" >/dev/null 2>&1; then
   echo "ERROR: Key Vault $VAULT not found in $RG. Did you deploy with enable_keyvault=true?" >&2
   exit 1
 fi
