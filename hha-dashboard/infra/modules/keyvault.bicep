@@ -34,6 +34,9 @@ param tenant_id string
 @maxValue(90)
 param soft_delete_retention_days int = 90
 
+@description('Enable purge protection. WARNING: this is a one-way switch — once true, you cannot disable it on this vault. Default true (HIPAA-friendlier). Set false on first deploy if you expect botched deploys to soft-delete-lock the name.')
+param enable_purge_protection bool = true
+
 @description('Workstation IP for the network ACL allowlist. Used only when pe_subnet_id is empty (no private endpoint).')
 param deployer_workstation_ip string = ''
 
@@ -61,7 +64,7 @@ resource vault 'Microsoft.KeyVault/vaults@2024-04-01-preview' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: soft_delete_retention_days
-    enablePurgeProtection: true
+    enablePurgeProtection: enable_purge_protection ? true : null
     enabledForDeployment: false
     enabledForDiskEncryption: false
     enabledForTemplateDeployment: false

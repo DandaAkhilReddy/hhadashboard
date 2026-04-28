@@ -26,10 +26,18 @@ param deployer_workstation_ip = '162.227.196.122'
 
 param env_name = 'prod'
 
-// Suffix added to KV name. The first prod attempt's `kv-hha-prod` is now
-// soft-deleted with purge protection enabled (cannot be purged for 90 days).
-// Use a different name on retry; future deploys reuse this one.
-param kv_name_suffix = '1'
+// Suffix added to KV name. Prior names locked by failed deploys with
+// purge protection: kv-hha-prod (eastus2 attempt #1), kv-hha-prod1
+// (centralus attempt). Use kv-hha-prod2 for this deploy.
+param kv_name_suffix = '2'
+
+// Disable purge protection so a botched deploy doesn't soft-delete-lock
+// the vault name for 90 days. Soft-delete itself is still on (90-day
+// retention) — that's accidental-delete recovery. Once the deploy is
+// stable, enable purge protection for HIPAA-friendlier defaults via:
+//   az keyvault update --name kv-hha-prod2 --enable-purge-protection
+// (one-way switch — only flip when you're confident the vault stays.)
+param enable_kv_purge_protection = false
 
 // Region: centralus. The HHA subscription's Postgres Flex offer is
 // restricted in both eastus and eastus2. centralus has historically been

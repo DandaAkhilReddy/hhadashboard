@@ -30,6 +30,9 @@ param env_name string
 @description('Optional Key Vault name suffix. Empty → "kv-hha-{env}". Use a short suffix like "1" when a prior KV with the same name is soft-deleted with purge protection (90-day reservation).')
 param kv_name_suffix string = ''
 
+@description('Whether to enable Key Vault purge protection. WARNING: ONE-WAY SWITCH — once true on a vault, you cannot disable it. Default true (HIPAA-friendlier). Set false in prod.bicepparam if early deploys are flaky and risk soft-delete-locking the vault name.')
+param enable_kv_purge_protection bool = true
+
 @description('Azure region. Picked for Postgres Flex SKU coverage and 3-AZ availability.')
 param location string = 'eastus2'
 
@@ -221,6 +224,7 @@ module keyvault './modules/keyvault.bicep' = if (enable_keyvault) {
     deployer_workstation_ip: deployer_workstation_ip
     pe_subnet_id: enable_vnet ? vnet!.outputs.pe_subnet_id : ''
     dns_zone_id: enable_vnet ? vnet!.outputs.kv_dns_zone_id : ''
+    enable_purge_protection: enable_kv_purge_protection
     tags: tags
   }
 }
