@@ -28,8 +28,23 @@ export default async function SiteDetailPage({
     notFound();
   }
 
-  const varianceTone = site.variance_pct < -15 ? "bad" : site.variance_pct < 0 ? "warn" : "good";
-  const shiftsTone = site.open_shifts === 0 ? "good" : site.open_shifts >= 3 ? "bad" : "warn";
+  // Phase 1: variance / open_shifts can be null. Tone falls back to neutral.
+  const varianceTone =
+    site.variance_pct === null
+      ? "neutral"
+      : site.variance_pct < -15
+        ? "bad"
+        : site.variance_pct < 0
+          ? "warn"
+          : "good";
+  const shiftsTone =
+    site.open_shifts === null
+      ? "neutral"
+      : site.open_shifts === 0
+        ? "good"
+        : site.open_shifts >= 3
+          ? "bad"
+          : "warn";
 
   const trendPoints = buildTrendPoints(
     site.recent_entries.map((e) => ({ entry_date: e.entry_date, census: e.census })),
@@ -68,21 +83,39 @@ export default async function SiteDetailPage({
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
         <MetricCard
           label="Census today"
-          value={num(site.census_today)}
+          value={site.census_today === null ? "—" : num(site.census_today)}
           sub={
-            <span className={varianceTone === "bad" ? "text-red-600" : "text-slate-500"}>
-              {signed(site.census_today - site.census_3mo_avg)} vs 3-mo avg
-            </span>
+            site.census_today !== null && site.census_3mo_avg !== null ? (
+              <span className={varianceTone === "bad" ? "text-red-600" : "text-slate-500"}>
+                {signed(site.census_today - site.census_3mo_avg)} vs 3-mo avg
+              </span>
+            ) : (
+              <span className="text-slate-400">no baseline yet</span>
+            )
           }
           tone={varianceTone}
           accent
         />
-        <MetricCard label="3-mo average" value={num(site.census_3mo_avg)} sub="baseline" />
-        <MetricCard label="MTD avg" value={site.mtd_avg.toFixed(1)} sub={pct(site.variance_pct)} />
+        <MetricCard
+          label="3-mo average"
+          value={site.census_3mo_avg === null ? "—" : num(site.census_3mo_avg)}
+          sub="baseline"
+        />
+        <MetricCard
+          label="MTD avg"
+          value={site.mtd_avg === null ? "—" : site.mtd_avg.toFixed(1)}
+          sub={site.variance_pct === null ? "—" : pct(site.variance_pct)}
+        />
         <MetricCard
           label="Open shifts"
-          value={num(site.open_shifts)}
-          sub={site.open_shifts === 0 ? "fully covered" : "needs coverage"}
+          value={site.open_shifts === null ? "—" : num(site.open_shifts)}
+          sub={
+            site.open_shifts === null
+              ? "—"
+              : site.open_shifts === 0
+                ? "fully covered"
+                : "needs coverage"
+          }
           tone={shiftsTone}
         />
       </div>
@@ -99,7 +132,9 @@ export default async function SiteDetailPage({
             <dt className="text-slate-500">Liaison</dt>
             <dd className="text-slate-700">{site.liaison ?? "—"}</dd>
             <dt className="text-slate-500">Contract end</dt>
-            <dd className="text-slate-700">{dateShort(site.contract_end)}</dd>
+            <dd className="text-slate-700">
+              {site.contract_end ? dateShort(site.contract_end) : "—"}
+            </dd>
             <dt className="text-slate-500">Annual subsidy</dt>
             <dd className="font-semibold text-slate-900 tabular-nums">
               {usd(site.annual_subsidy_usd, true)}
@@ -110,9 +145,9 @@ export default async function SiteDetailPage({
         <Card>
           <CardHeader
             title="14-day census trend"
-            owner={`Today highlighted · 3-mo avg ${site.census_3mo_avg}`}
+            owner={`Today highlighted · 3-mo avg ${site.census_3mo_avg ?? "—"}`}
           />
-          <CensusTrendChart points={trendPoints} avg={site.census_3mo_avg} />
+          <CensusTrendChart points={trendPoints} avg={site.census_3mo_avg ?? 0} />
         </Card>
       </div>
 

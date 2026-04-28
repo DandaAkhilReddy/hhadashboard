@@ -83,22 +83,24 @@ export default async function OverviewPage() {
             <tbody>
               {fl.map((s) => {
                 const tone =
-                  s.variance_pct < -15
-                    ? "text-red-600"
-                    : s.variance_pct < 0
-                      ? "text-amber-600"
-                      : "text-emerald-600";
+                  s.variance_pct === null
+                    ? "text-slate-400"
+                    : s.variance_pct < -15
+                      ? "text-red-600"
+                      : s.variance_pct < 0
+                        ? "text-amber-600"
+                        : "text-emerald-600";
                 return (
                   <tr key={s.name} className="border-t border-slate-100">
                     <td className="py-2 font-semibold text-slate-800">{s.name}</td>
                     <td className={`py-2 text-right font-bold tabular-nums ${tone}`}>
-                      {s.census_today}
+                      {s.census_today ?? "—"}
                     </td>
                     <td className="py-2 text-right tabular-nums text-slate-500">
-                      {s.census_3mo_avg}
+                      {s.census_3mo_avg ?? "—"}
                     </td>
                     <td className={`py-2 text-right tabular-nums ${tone}`}>
-                      {pct(s.variance_pct)}
+                      {s.variance_pct === null ? "—" : pct(s.variance_pct)}
                     </td>
                   </tr>
                 );

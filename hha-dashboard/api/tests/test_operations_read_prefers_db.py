@@ -70,24 +70,22 @@ async def test_get_sites_today_prefers_db_value() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_sites_today_falls_back_to_zero_when_no_entry() -> None:
-    """Sites without a DailyEntry row render with census=0 (Phase 1 contract).
-
-    The pre-Phase-1 deterministic fake fallback was reverted to (0, 0) so the
-    Operations Board only reflects real census submissions. See
-    `_fake_site_row` in app/services/fake_data.py.
-    """
+async def test_get_sites_today_returns_none_when_no_entry() -> None:
+    """Sites without a DailyEntry row render with census=None (Phase 1 empty
+    contract). The frontend renders None as "—". Real entries pass through
+    as integers."""
     db = _mock_db(_DEFAULT_SITES, [("Westside Regional", 198, 3)])
     today = date(2026, 4, 23)
 
     rows = await fake_data.get_sites_today(db=db, today=today)
     by_name = {r["name"]: r for r in rows}
 
-    # Westside has a real entry — keeps its DB value.
+    # Westside has a real entry — keeps its DB value (a real 0 would also
+    # pass through, distinguished from the unentered None).
     assert by_name["Westside Regional"]["census_today"] == 198
-    # Woodmont has no entry — now zero, not a deterministic fake.
-    assert by_name["Woodmont Hospital"]["census_today"] == 0
-    assert by_name["Woodmont Hospital"]["open_shifts"] == 0
+    # Woodmont has no entry — empty.
+    assert by_name["Woodmont Hospital"]["census_today"] is None
+    assert by_name["Woodmont Hospital"]["open_shifts"] is None
 
 
 @pytest.mark.asyncio
@@ -99,21 +97,26 @@ async def test_get_sites_today_no_db_is_pure_fake() -> None:
     assert len(rows) == 11
     for r in rows:
         assert r["id"] >= 1  # positional fallback
-        assert r["census_today"] >= 0
+        # Phase 1: census is None for sites without a real entry.
+        assert r["census_today"] is None or r["census_today"] >= 0
         assert r["name"]
         assert r["state"] in {"FL", "TX"}
 
 
 @pytest.mark.asyncio
-async def test_get_sites_today_variance_uses_db_value() -> None:
-    """Variance_pct is computed from the chosen census — confirm the DB value feeds it."""
+async def test_get_sites_today_passes_through_db_census_value() -> None:
+    """Real DB census flows through unchanged. Phase 1 dropped the
+    deterministic 3-mo-avg from the spec, so variance_pct is None — the
+    frontend renders that as "—" and stops computing trends until real
+    historical data lands."""
     db = _mock_db(_DEFAULT_SITES, [("Westside Regional", 265, 0)])
 
     rows = await fake_data.get_sites_today(db=db)
     westside = next(r for r in rows if r["name"] == "Westside Regional")
 
     assert westside["census_today"] == 265
-    assert abs(westside["variance_pct"]) < 0.5  # ~0
+    assert westside["variance_pct"] is None
+    assert westside["census_3mo_avg"] is None
 
 
 @pytest.mark.asyncio
