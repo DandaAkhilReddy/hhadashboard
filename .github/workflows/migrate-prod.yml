@@ -1,0 +1,178 @@
+name: migrate-prod
+
+# Run `alembic upgrade <target>` against the prod Postgres via the Kudu
+# (App Service Advanced Tools) remote-command API.
+#
+# Why Kudu and not a direct DB connection from the runner:
+#   The prod Postgres is VNet-injected and not reachable from a public
+#   GitHub-hosted runner. The api App Service lives inside that VNet,
+#   has alembic + all migration files baked into its deployed zip, and
+#   can reach the DB directly. Kudu's /api/command endpoint lets us
+#   execute a shell command inside the App Service sandbox over HTTPS —
+#   no VPN, no Container App job, no additional infrastructure.
+#
+# Prerequisites (must be true before running this workflow):
+#   1. deploy-prod-code.yml (api job) has run at least once so that
+#      /home/site/wwwroot contains alembic.ini and the migrations/
+#      directory. Running migrate-prod before a code deploy will fail
+#      with "alembic: command not found" or "No such file".
+#   2. Bicep has deployed the App Service and seeded KV secrets so that
+#      DATABASE_URL and DATABASE_URL_SYNC app settings resolve correctly
+#      (the App Service reads them at startup via KV references). Alembic
+#      uses DATABASE_URL_SYNC (psycopg driver) which is set by Bicep as
+#      either a literal or a @Microsoft.KeyVault(...) reference.
+#   3. The api App Service's system-assigned managed identity has been
+#      granted Key Vault Secrets User on kv-hha-prod (done by Bicep when
+#      enable_keyvault=true).
+#
+# Kudu basic-auth caveat:
+#   This workflow authenticates to Kudu using publishing credentials
+#   (username + password fetched via `az webapp deployment
+#   list-publishing-credentials`). Basic auth on the SCM endpoint is
+#   ENABLED by default on App Service but can be disabled as a security
+#   hardening measure (Azure Policy: "App Service apps should have
+#   basic auth disabled for deployment"). If your tenant enforces that
+#   policy, the curl call will return HTTP 401 and the job will fail.
+#   Fallback: replace the curl block with:
+#     az webapp ssh -n app-hha-api-prod -g rg-hha-dashboard-prod \
+#       --command "cd /home/site/wwwroot && uv run alembic upgrade $TARGET"
+#   `az webapp ssh` uses Azure AD auth (the runner's OIDC token) and
+#   does not depend on basic auth being enabled.
+#
+# Idempotency:
+#   `alembic upgrade head` against an already-current DB prints
+#   "INFO  [alembic.runtime.migration] Running upgrade  -> <rev>, ..."
+#   or "INFO  ... No upgrade steps needed." and exits 0. Safe to re-run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "migrate-prod" to confirm running alembic against the prod DB'
+        required: false
+        default: ''
+      target:
+        description: 'Alembic revision target (default: head)'
+        required: false
+        default: 'head'
+
+permissions:
+  id-token: write   # OIDC token for azure/login
+  contents: read
+
+concurrency:
+  group: deploy-prod   # shared with deploy-prod.yml — serialises infra + migration runs
+  cancel-in-progress: false   # never cancel a migration mid-flight
+
+jobs:
+  validate:
+    name: Validate confirm input
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require explicit confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "migrate-prod" ]; then
+            echo "::error::Safety check failed. You must type exactly 'migrate-prod' in the confirm field to proceed."
+            echo "::error::Got: '${{ inputs.confirm }}'"
+            exit 1
+          fi
+          echo "::notice::Confirmed. Will run: alembic upgrade ${{ inputs.target }}"
+
+  migrate:
+    name: alembic upgrade ${{ inputs.target }} (PROD)
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+      url: https://app-hha-api-prod.azurewebsites.net/ready
+    timeout-minutes: 10
+
+    env:
+      RG: rg-hha-dashboard-prod
+      APP: app-hha-api-prod
+      SCM_HOST: app-hha-api-prod.scm.azurewebsites.net
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Confirm App Service is running
+        run: |
+          STATE=$(az webapp show -n "$APP" -g "$RG" --query 'state' -o tsv)
+          echo "::notice::App Service state: $STATE"
+          if [ "$STATE" != "Running" ]; then
+            echo "::error::App Service $APP is not in Running state (got: $STATE). Start it before running migrations."
+            exit 1
+          fi
+
+      - name: Run alembic upgrade via Kudu /api/command
+        run: |
+          set -euo pipefail
+
+          TARGET="${{ inputs.target }}"
+          echo "::notice::Target revision: $TARGET"
+
+          # Fetch publishing credentials — these are the Kudu basic-auth creds,
+          # scoped to this App Service only. They are NOT Azure AD credentials.
+          # See header comment if basic auth has been disabled on your tenant.
+          CREDS=$(az webapp deployment list-publishing-credentials \
+            -n "$APP" -g "$RG" \
+            --query '{u:publishingUserName,p:publishingPassword}' \
+            -o json)
+          KUDU_USER=$(echo "$CREDS" | jq -r '.u')
+          KUDU_PASS=$(echo "$CREDS" | jq -r '.p')
+
+          # POST to Kudu's remote-command endpoint.
+          # The 'dir' field is relative to D:\home on Windows-plan App Services
+          # or /home on Linux-plan App Services; wwwroot is the deployment root.
+          # 'uv run alembic' uses the uv-managed venv baked into the zip.
+          curl -fsS \
+            -u "${KUDU_USER}:${KUDU_PASS}" \
+            -X POST "https://${SCM_HOST}/api/command" \
+            -H 'Content-Type: application/json' \
+            -d "{\"command\":\"uv run alembic upgrade ${TARGET}\",\"dir\":\"site/wwwroot\"}" \
+            -o migrate-output.json
+
+          echo "--- Kudu response ---"
+          cat migrate-output.json
+          echo ""
+
+          # Kudu returns: { "Output": "...", "Error": "...", "ExitCode": N }
+          EXIT_CODE=$(jq -r '.ExitCode' migrate-output.json)
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "::error::alembic exited with code $EXIT_CODE"
+            echo "--- stderr ---"
+            jq -r '.Error' migrate-output.json
+            exit 1
+          fi
+
+          echo "::notice::alembic upgrade ${TARGET} completed successfully (exit 0)"
+          echo "--- stdout ---"
+          jq -r '.Output' migrate-output.json
+
+      - name: Verify current alembic head
+        run: |
+          set -euo pipefail
+
+          CREDS=$(az webapp deployment list-publishing-credentials \
+            -n "$APP" -g "$RG" \
+            --query '{u:publishingUserName,p:publishingPassword}' \
+            -o json)
+          KUDU_USER=$(echo "$CREDS" | jq -r '.u')
+          KUDU_PASS=$(echo "$CREDS" | jq -r '.p')
+
+          curl -fsS \
+            -u "${KUDU_USER}:${KUDU_PASS}" \
+            -X POST "https://${SCM_HOST}/api/command" \
+            -H 'Content-Type: application/json' \
+            -d '{"command":"uv run alembic current","dir":"site/wwwroot"}' \
+            -o current-output.json
+
+          echo "--- alembic current ---"
+          jq -r '.Output' current-output.json
