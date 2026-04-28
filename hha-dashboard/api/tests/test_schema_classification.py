@@ -15,7 +15,20 @@ from __future__ import annotations
 
 # Import every model module here so its tables register on Base.metadata.
 # As new model files are added, import them below.
-from app.models import alerts, audit, census_credentials, entries, masters, uploads  # noqa: F401
+# Phase 1 fix (audit drift report): entries_clinical / entries_finance /
+# entries_hr were silently absent from this gate, leaving WeeklyClinical,
+# MonthlyFinanceManual and WeeklyHrManual unchecked for HIPAA classification.
+from app.models import (  # noqa: F401
+    alerts,
+    audit,
+    census_credentials,
+    entries,
+    entries_clinical,
+    entries_finance,
+    entries_hr,
+    masters,
+    uploads,
+)
 from app.models.base import Base, DataClass
 
 VALID_DATA_CLASSES = {c.value for c in DataClass}

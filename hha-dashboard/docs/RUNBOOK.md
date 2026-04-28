@@ -473,6 +473,327 @@ WHERE changed_by_upn = '__system__'
 - Breach response — covered by HHA's HIPAA incident-response policy, not this doc. Notify the Privacy Officer immediately.
 - Cost overrun — App Insights ingestion is the most likely runaway. Cap via Log Analytics daily quota in `monitor.bicep`.
 
+## G. Post-deploy verification (first 24 hours)
+
+> See also: [docs/PHASE_1_CENSUS_PORTAL.md](PHASE_1_CENSUS_PORTAL.md), [scripts/smoke_deploy.sh](../scripts/smoke_deploy.sh).
+
+This is the checklist an operator runs after a fresh prod deploy completes. Work through it top-to-bottom. Each subsection is roughly ordered by "how fast will this blow up if it's wrong."
+
+---
+
+### G.1 Smoke tests
+
+Run the smoke suite against the prod URL immediately after the deploy workflow turns green:
+
+```bash
+DEPLOY_URL=https://app-hha-api-prod.azurewebsites.net \
+WEB_URL=https://app-hha-web-prod.azurewebsites.net \
+  bash scripts/smoke_deploy.sh
+```
+
+All green means:
+
+- Exit code 0 from the script
+- `/health` → `{"status":"ok"}` (HTTP 200)
+- `/ready` → HTTP 200 with `checks.db=ok`, `checks.schema=ok`, `checks.audit_trigger=ok`, `checks.sites=ok`
+- Census login round-trip returns HTTP 200 (not 401, not 500)
+- At least one row written to `entries.daily_entries` and confirmed readable
+
+If any check fails, the script exits non-zero and prints which step failed. Do not declare the deploy successful until this is clean.
+
+---
+
+### G.2 App Insights — first hour watch
+
+Open **Azure Portal → appi-hha-prod → Logs** and run the queries below. Keep this tab open for the first hour.
+
+**Any ERRORs or CRITICALs?**
+
+```kusto
+traces
+| where severityLevel >= 3
+| order by timestamp desc
+| take 50
+```
+
+Zero rows is the target. One or two `WARNING` rows (severityLevel 2) at startup (e.g., config resolution) are acceptable if they stop recurring.
+
+**5xx rate above 1%?**
+
+```kusto
+requests
+| where timestamp > ago(1h)
+| summarize
+    total = count(),
+    errors = countif(resultCode >= 500)
+| extend error_pct = round(100.0 * errors / total, 2)
+```
+
+`error_pct` must be < 1. If it spikes, pull the correlation IDs from that same window and follow **D.3**.
+
+**Postgres p99 latency and failures:**
+
+```kusto
+dependencies
+| where timestamp > ago(1h)
+| where type == "SQL" or target has "postgres"
+| summarize
+    p99_ms = percentile(duration, 99),
+    failures = countif(success == false),
+    calls = count()
+| project p99_ms, failures, calls
+```
+
+| Threshold | Action |
+|---|---|
+| `p99_ms` < 300 ms | Normal |
+| `p99_ms` 300–800 ms | Investigate (index missing? connection pool exhausted?) |
+| `p99_ms` > 800 ms | Page the operator — likely pool saturation or Postgres vCPU throttle |
+| `failures` > 0 | Always investigate — Postgres should not error in steady state |
+
+**Census lockout events (should be zero in first hour):**
+
+```kusto
+customEvents
+| where timestamp > ago(1h)
+| where name == "census_portal.locked"
+```
+
+Any rows here in the first hour mean someone (or something) is hammering the census login endpoint. Check source IPs in the `requests` table.
+
+---
+
+### G.3 Postgres — sanity SELECTs
+
+Connect to prod:
+
+```bash
+DBURL=$(az keyvault secret show \
+  --vault-name kv-hha-prod \
+  -n database-url-sync \
+  --query value -o tsv)
+
+psql "$DBURL"
+```
+
+Run each check:
+
+```sql
+-- 11 sites seeded (10 if running a pilot subset)
+SELECT COUNT(*) FROM masters.sites;
+-- expected: 11
+
+-- Exactly one census credential row
+SELECT COUNT(*) FROM auth.census_credentials;
+-- expected: 1
+
+-- Correct canonical email
+SELECT email FROM auth.census_credentials WHERE id = 1;
+-- expected: portal@hhamedicine.com
+
+-- Last smoke write landed (timestamp should match H+0 smoke run time)
+SELECT MAX(updated_at) FROM entries.daily_entries;
+
+-- Audit triggers fired at least once during the smoke run
+SELECT COUNT(*) FROM audit.audit_log
+WHERE changed_at > now() - interval '1 hour';
+-- expected: >= 1 (at minimum the smoke INSERT)
+```
+
+If `masters.sites` returns fewer than 11, re-run `scripts/seed_sites.py`. If `auth.census_credentials` returns 0, re-run `infra/census_seed.sh`.
+
+---
+
+### G.4 Blob storage — pg_backup landed
+
+At H+3 manually trigger the backup job (see § C "Trigger a cron job manually"), then verify:
+
+```bash
+ACCT=$(az storage account list -g rg-hha-dashboard-prod \
+  --query '[0].name' -o tsv)
+
+az storage blob list \
+  --account-name $ACCT \
+  --container-name backups \
+  --query '[].{name:name,modified:lastModified,size:properties.contentLength}' \
+  -o table
+```
+
+There must be at least one `.sql.gz` blob dated within the last hour. If the list is empty or shows only blobs older than yesterday, the job failed — see **D.6**.
+
+**WORM immutability policy** — do not verify until H+8 (policy activation has a propagation delay on Azure). After H+8:
+
+```bash
+az storage container immutability-policy show \
+  --account-name $ACCT \
+  --container-name backups
+```
+
+`state` must be `Locked`. If still `Unlocked`, follow [ADR-004 § Part 3](adr/004-backup-and-disaster-recovery.md#part-3--worm-immutability-lock) to complete the lock. **Do not run this on a blob that you need to delete** — locked WORM is irreversible.
+
+---
+
+### G.5 ACS Email — sender validation
+
+Verify SPF and DKIM are published for the sender domain (`hhamedicine.com`):
+
+```bash
+# SPF
+dig TXT hhamedicine.com +short | grep spf
+
+# DKIM (selector depends on your ACS domain config; check ACS portal for the selector name)
+dig TXT <selector>._domainkey.hhamedicine.com +short
+```
+
+Both must return non-empty records. If either is missing, email will soft-fail or bounce — open the ACS portal → Email → Domains and follow the DNS record instructions.
+
+**Confirm a test email arrived.** The `job-cred-scan` cron run at H+3 sends an email to subscribers if expiry events exist. Check `alerts.alert_log` for a row from today and confirm the recipient received it. If no expiry events exist (healthy system), trigger a manual smoke email via the API or send a test from the ACS portal.
+
+---
+
+### G.6 App Service — config + logs
+
+**Confirm all Key Vault references resolved** (no raw `@Microsoft.KeyVault(...)` literals should appear in the values column):
+
+```bash
+az webapp config appsettings list \
+  --name app-hha-api-prod \
+  -g rg-hha-dashboard-prod \
+  -o table
+```
+
+| Setting | Expected value |
+|---|---|
+| `DATABASE_URL` | `postgresql+asyncpg://…` (resolved, not a KV reference literal) |
+| `SESSION_SECRET` | 44-character base64 string (resolved) |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | `InstrumentationKey=…` (resolved) |
+
+If any value still shows `@Microsoft.KeyVault(…)`, the managed identity doesn't have `Key Vault Secrets User` on the vault — see the fix in **D.3** (KV reference row).
+
+**Confirm logs are quiet:**
+
+```bash
+az webapp log tail \
+  --name app-hha-api-prod \
+  -g rg-hha-dashboard-prod
+```
+
+Startup should emit a few `INFO` structlog lines then go quiet. Repeated `ERROR` or `WARNING` lines mean a background task is failing. Let it run for ~30 seconds; if you see the same error repeating, treat it as an incident.
+
+---
+
+### G.7 Domain + TLS
+
+```bash
+DOMAIN=<your-custom-domain>   # e.g., api.hha-dashboard.hhamedicine.com
+
+# 200 + no cert error
+curl -fsS -I "https://${DOMAIN}/health"
+
+# Cert details: issuer, expiry, SANs
+openssl s_client -connect "${DOMAIN}:443" -servername "${DOMAIN}" \
+  </dev/null 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates
+```
+
+Expected:
+
+- `curl` returns HTTP 200 (not 301 to a `.azurewebsites.net` domain, not a cert error)
+- `issuer` contains `DigiCert` or `Microsoft` (App Service managed cert)
+- `notAfter` is at least 6 months out — if < 90 days, open a cert-renewal task now
+
+If the domain isn't bound yet, follow **App Service → Custom domains → Add custom domain** in the portal and re-run `main.bicep` with the `custom_domain` param.
+
+---
+
+### G.8 Cost — first 24h sanity
+
+Pull the current billing period's usage (replace `YYYYMM` with e.g. `202604`):
+
+```bash
+az consumption usage list \
+  --billing-period-name <YYYYMM> \
+  -o table | head -20
+```
+
+Postgres Flex Server is typically the largest line item (~60% of monthly cost). If Storage or App Insights is unexpectedly large, check for:
+
+- App Insights ingestion runaway → cap via Log Analytics daily quota in `monitor.bicep`
+- Storage bloat → check for unintentional blob retention (smoke test writing large objects?)
+
+**Set a cost alert if not already present:**
+
+```bash
+RG_ID=$(az group show -n rg-hha-dashboard-prod --query id -o tsv)
+
+az consumption budget create \
+  --budget-name hha-prod-monthly \
+  --amount 400 \
+  --time-grain Monthly \
+  --start-date "$(date -u +%Y-%m-01)" \
+  --end-date "2027-01-01" \
+  --resource-group-filter $RG_ID \
+  --notification \
+    enabled=true threshold=80 contact-emails="areddy@hhamedicine.com" \
+  --notification \
+    enabled=true threshold=100 contact-emails="areddy@hhamedicine.com"
+```
+
+Target: < $400/mo for a single-environment prod with 11 sites. Alert at 80% (~$320) and 100% ($400).
+
+---
+
+### G.9 Rollback escape hatch
+
+If the deploy is actively broken and you can't fix forward in < 30 minutes, revert:
+
+**List deployment slots (check if a staging slot exists):**
+
+```bash
+az webapp deployment slot list \
+  --name app-hha-api-prod \
+  -g rg-hha-dashboard-prod \
+  -o table
+```
+
+**Swap back to the previous slot** (if a staging slot was used for blue/green):
+
+```bash
+az webapp deployment slot swap \
+  --name app-hha-api-prod \
+  -g rg-hha-dashboard-prod \
+  --slot staging \
+  --target-slot production
+```
+
+**Push a prior zip directly** (if no slot swap is available):
+
+```bash
+az webapp deployment source config-zip \
+  --name app-hha-api-prod \
+  -g rg-hha-dashboard-prod \
+  --src <path-to-previous-api.zip>
+```
+
+**Schema migrations — DO NOT roll back without operator coordination.** `alembic downgrade` is one-way risk: the downgrade script may not exist or may destroy data. If the breakage is schema-related, fix forward with a new migration or hotfix the code to tolerate both schema versions. Coordinate with the technical lead before touching `alembic downgrade` in prod.
+
+---
+
+### G.10 The 24-hour watch list
+
+Check these the morning after deploy (H+24):
+
+- [ ] `bash scripts/smoke_deploy.sh` still exits 0 (consider wiring to a daily GitHub Actions cron)
+- [ ] No App Insights alerts fired overnight (`traces | where severityLevel >= 3 | where timestamp > ago(24h)`)
+- [ ] Backup blob exists dated 03:00 UTC (`az storage blob list … | grep $(date -u +%Y-%m-%d)`)
+- [ ] Census portal lockout event count is still 0 (`customEvents | where name == "census_portal.locked"`)
+- [ ] No user-reported auth failures in Slack / email
+- [ ] 24h cost trajectory is on track (< $14/day at $400/mo ceiling)
+
+If all boxes are checked: the deploy is stable. Add a note to `docs/FIRST_DEPLOY_NOTES.md` and close the deploy ticket.
+
+---
+
 ## F. Where to find more
 
 - **System overview** → [ARCHITECTURE.md](ARCHITECTURE.md)

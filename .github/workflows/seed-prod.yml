@@ -1,0 +1,209 @@
+name: seed-prod
+
+# Manual seed workflow for the PROD database.
+# Companion to migrate-prod.yml (Alembic) and deploy-prod-code.yml (app deploy).
+#
+# Runs seed scripts via Kudu remote command against the api App Service, so it
+# requires NO VNet access from the GitHub runner — the App Service itself has
+# the DB connection string in its app settings and the scripts use it.
+#
+# ── PRE-REQUISITE ────────────────────────────────────────────────────────────
+# scripts/ must be included in the api zip deployed by deploy-prod-code.yml.
+# The current deploy-prod-code.yml api build step copies only:
+#   app/ alembic/ alembic.ini pyproject.toml uv.lock
+# Add the following line to that build step immediately after the cp command:
+#   cp -r ../../hha-dashboard/scripts ../../api-deploy/scripts
+# Without that change, Kudu will report "script not found" when this runs.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ── OPERATOR SEQUENCE ────────────────────────────────────────────────────────
+# 1. deploy-prod.yml       (Bicep infra)
+# 2. deploy-prod-code.yml  (zip deploy — with scripts/ included, see above)
+# 3. migrate-prod.yml      (Alembic head)
+# 4. seed-prod.yml         (this workflow, idempotent seeds)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ── PORTAL PASSWORD SECURITY NOTE ────────────────────────────────────────────
+# Workflow_dispatch inputs are logged in the GitHub Actions UI and are visible
+# to any user with repo-write access. The `portal_password` input is therefore
+# visible in the "Run workflow" trigger UI even though it is masked in log lines
+# via ::add-mask::.
+#
+# Two options for the census portal password:
+#
+# Option A (first-time seed, convenience): paste into the `portal_password`
+#   input field. It is masked in step logs but visible in the trigger UI to
+#   repo-write users. Acceptable when the operator is the only person running
+#   this workflow and the repo has restricted write access.
+#
+# Option B (rotation / higher hygiene): store the password as a GitHub secret
+#   named CENSUS_PORTAL_PW_PROD (Settings → Secrets → Actions). Use a
+#   dedicated rotation workflow that reads `secrets.CENSUS_PORTAL_PW_PROD`
+#   and calls this workflow or re-runs the Kudu command directly. Secrets are
+#   never shown in the trigger UI or log output.
+#
+# Recommendation: use Option A for initial provisioning, then immediately
+# rotate by setting CENSUS_PORTAL_PW_PROD as a secret and referencing it in
+# future runs.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Repository variables required (same set as deploy-prod.yml):
+#   AZURE_CLIENT_ID         — federated credential app id
+#   AZURE_TENANT_ID         — HHA's M365 tenant id
+#   AZURE_SUBSCRIPTION_ID   — hha-production subscription id
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "seed-prod" to confirm seeding prod DB'
+        required: false
+        default: ''
+      seed_sites:
+        description: 'Run seed_sites.py (idempotent)'
+        type: boolean
+        default: true
+      seed_portal_credential:
+        description: 'Run seed_census_credential.py with provided email + password'
+        type: boolean
+        default: true
+      portal_email:
+        description: 'Census portal email'
+        required: false
+        default: 'portal@hhamedicine.com'
+      portal_password:
+        description: '[SENSITIVE] Census portal password — paste plain text here; masked in logs but visible in trigger UI to repo-write users (see header comment)'
+        required: false
+        default: ''
+      seed_alert_subscriptions:
+        description: 'Seed exec alert subscriptions'
+        type: boolean
+        default: true
+      alert_email:
+        description: 'Email for exec alert subscription (sponsor)'
+        required: false
+        default: ''
+
+concurrency:
+  group: deploy-prod-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # for OIDC token exchange
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm input
+        if: inputs.confirm != 'seed-prod'
+        run: |
+          echo "::error::You must type 'seed-prod' as the confirm input."
+          exit 1
+
+  seed:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Read Kudu publishing credentials
+        id: kudu
+        run: |
+          set -euo pipefail
+          CREDS=$(az webapp deployment list-publishing-credentials \
+            -n app-hha-api-prod -g rg-hha-dashboard-prod \
+            --query '{u:publishingUserName,p:publishingPassword}' -o json)
+          echo "user=$(echo "$CREDS" | jq -r '.u')" >> $GITHUB_OUTPUT
+          # Mask the password before writing it to GITHUB_OUTPUT so it never
+          # appears in logs, even in ::debug:: output.
+          echo "::add-mask::$(echo "$CREDS" | jq -r '.p')"
+          echo "pass=$(echo "$CREDS" | jq -r '.p')" >> $GITHUB_OUTPUT
+
+      - name: Seed sites
+        if: ${{ inputs.seed_sites }}
+        run: |
+          set -euo pipefail
+          curl -fsS \
+            -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
+            -X POST "https://app-hha-api-prod.scm.azurewebsites.net/api/command" \
+            -H 'Content-Type: application/json' \
+            -d '{"command":"uv run python scripts/seed_sites.py","dir":"site/wwwroot"}' \
+            | tee seed-sites-output.json
+          if [ "$(jq -r '.ExitCode' seed-sites-output.json)" != "0" ]; then
+            echo "::error::seed_sites.py failed"
+            jq -r '.Error' seed-sites-output.json
+            exit 1
+          fi
+          echo "seed_sites OK"
+
+      - name: Seed portal credential
+        if: ${{ inputs.seed_portal_credential && inputs.portal_password != '' }}
+        env:
+          PORTAL_PW: ${{ inputs.portal_password }}
+          PORTAL_EMAIL: ${{ inputs.portal_email }}
+        run: |
+          set -euo pipefail
+          # Mask the password immediately — before it can appear in any log line.
+          echo "::add-mask::$PORTAL_PW"
+          # Build the Kudu JSON payload using jq so the password is never
+          # interpolated into a shell string that could be echoed or traced.
+          # jq --arg injects the value safely without shell expansion.
+          PAYLOAD=$(jq -n \
+            --arg email "$PORTAL_EMAIL" \
+            --arg pw "$PORTAL_PW" \
+            '{"command": ("uv run python scripts/seed_census_credential.py --email " + $email + " --password " + $pw), "dir": "site/wwwroot"}')
+          # Redirect response body to file and suppress stdout to prevent any
+          # accidental password echo in the Kudu output body.
+          curl -fsS \
+            -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
+            -X POST "https://app-hha-api-prod.scm.azurewebsites.net/api/command" \
+            -H 'Content-Type: application/json' \
+            -d "$PAYLOAD" \
+            | tee seed-cred-output.json > /dev/null
+          if [ "$(jq -r '.ExitCode' seed-cred-output.json)" != "0" ]; then
+            echo "::error::seed_census_credential.py failed (output suppressed to avoid password leak)"
+            exit 1
+          fi
+          echo "seed_census_credential OK (password redacted)"
+
+      - name: Seed alert subscriptions
+        if: ${{ inputs.seed_alert_subscriptions && inputs.alert_email != '' }}
+        run: |
+          set -euo pipefail
+          PAYLOAD=$(jq -n \
+            --arg email "${{ inputs.alert_email }}" \
+            '{"command": ("uv run python scripts/seed_alert_subscriptions.py --role exec --email " + $email + " --categories all --frequency daily"), "dir": "site/wwwroot"}')
+          curl -fsS \
+            -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
+            -X POST "https://app-hha-api-prod.scm.azurewebsites.net/api/command" \
+            -H 'Content-Type: application/json' \
+            -d "$PAYLOAD" \
+            | tee seed-alert-output.json
+          if [ "$(jq -r '.ExitCode' seed-alert-output.json)" != "0" ]; then
+            echo "::error::seed_alert_subscriptions.py failed"
+            jq -r '.Error' seed-alert-output.json
+            exit 1
+          fi
+          echo "seed_alert_subscriptions OK"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Seed summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Script | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| seed_sites.py | ${{ inputs.seed_sites && 'run' || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| seed_census_credential.py | ${{ (inputs.seed_portal_credential && inputs.portal_password != '') && 'run (password redacted)' || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| seed_alert_subscriptions.py | ${{ (inputs.seed_alert_subscriptions && inputs.alert_email != '') && 'run' || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
