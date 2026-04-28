@@ -1,0 +1,201 @@
+name: deploy-prod-code
+
+# Zip-deploy the api and web App Services to prod via OIDC federated identity.
+#
+# This is the companion to deploy-prod.yml which handles Bicep infra only.
+# Run deploy-prod.yml first (or confirm infra is current) before running this.
+#
+# Federated credential subject used: repo:DandaAkhilReddy/hhadashboard:environment:prod
+# That binding means GitHub blocks here for required-reviewer approval before
+# the OIDC token is even issued.
+#
+# Repository variables required (same set as deploy-prod.yml):
+#   AZURE_CLIENT_ID         — federated credential's app id
+#   AZURE_TENANT_ID         — HHA's M365 tenant id
+#   AZURE_SUBSCRIPTION_ID   — hha-production subscription id
+#
+# Inputs:
+#   confirm     — must type "deploy-prod-code" to proceed (safety gate)
+#   api_only    — skip web deploy
+#   web_only    — skip api deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy-prod-code" to confirm a non-dry deploy'
+        required: false
+        default: ''
+      api_only:
+        description: 'Deploy api only (skip web)'
+        type: boolean
+        default: false
+      web_only:
+        description: 'Deploy web only (skip api)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-prod-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # for OIDC
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm input
+        if: inputs.confirm != 'deploy-prod-code'
+        run: |
+          echo "::error::You must type 'deploy-prod-code' as the confirm input."
+          exit 1
+
+  api:
+    needs: validate
+    if: ${{ !inputs.web_only }}
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build api zip
+        working-directory: hha-dashboard/api
+        run: |
+          uv sync --frozen --no-dev
+          # Stage everything we ship: app/, alembic/, alembic.ini, pyproject.toml,
+          # uv.lock, the resolved .venv site-packages (App Service Linux Python
+          # runtime expects 'site-packages' at the wwwroot)
+          mkdir -p ../../api-deploy
+          cp -r app alembic alembic.ini pyproject.toml uv.lock ../../api-deploy/
+          # Ship the seed scripts too — migrate-prod.yml and seed-prod.yml
+          # invoke them via Kudu against /home/site/wwwroot/scripts.
+          cp -r ../scripts ../../api-deploy/scripts
+          # The App Service "Oryx build" path: pin a startup command that uvicorn-runs
+          # the app. uv is not pre-installed on App Service Linux Python, so we
+          # bootstrap it on the first request (idempotent — pip install is no-op
+          # if already present).
+          cat > ../../api-deploy/startup.sh <<'STARTUP'
+          #!/bin/bash
+          set -e
+          cd /home/site/wwwroot
+          # Bootstrap uv (not on the base image)
+          command -v uv >/dev/null 2>&1 || pip install --quiet uv
+          # Apply migrations on every startup (idempotent; safe). Comment out if
+          # you'd rather use migrate-prod.yml exclusively.
+          uv run alembic upgrade head || echo "Migration step skipped/failed; check logs"
+          exec uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+          STARTUP
+          chmod +x ../../api-deploy/startup.sh
+          cd ../../api-deploy && zip -r ../api-deploy.zip . > /dev/null
+          ls -lh ../api-deploy.zip
+
+      - name: Deploy api zip to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: app-hha-api-prod
+          package: ${{ github.workspace }}/api-deploy.zip
+          startup-command: 'bash startup.sh'
+
+      - name: Health check
+        run: |
+          for i in 1 2 3 4 5 6; do
+            sleep 30
+            if curl -fsS https://app-hha-api-prod.azurewebsites.net/health; then
+              echo "api healthy"
+              exit 0
+            fi
+          done
+          echo "::error::api did not become healthy in 3 minutes"
+          exit 1
+
+  web:
+    needs: validate
+    if: ${{ !inputs.api_only }}
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: hha-dashboard/web/package-lock.json
+
+      - name: Install + build web
+        working-directory: hha-dashboard/web
+        env:
+          # Required at build time (NEXT_PUBLIC_* are inlined into the bundle)
+          NEXT_PUBLIC_API_BASE_URL: https://app-hha-api-prod.azurewebsites.net
+        run: |
+          npm ci
+          npm run build
+
+      - name: Stage web zip
+        working-directory: hha-dashboard/web
+        run: |
+          mkdir -p ../../web-deploy
+          cp -r .next package.json package-lock.json node_modules public ../../web-deploy/ || true
+          cd ../../web-deploy && zip -qr ../web-deploy.zip . && ls -lh ../web-deploy.zip
+
+      - name: Deploy web zip to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: app-hha-web-prod
+          package: ${{ github.workspace }}/web-deploy.zip
+          startup-command: 'npm run start'
+
+      - name: Health check
+        run: |
+          for i in 1 2 3 4 5 6 7 8; do
+            sleep 30
+            if curl -fsS https://app-hha-web-prod.azurewebsites.net/api/auth/me; then
+              echo "web healthy"
+              exit 0
+            fi
+          done
+          echo "::error::web did not become healthy in 4 minutes"
+          exit 1
+
+  summary:
+    needs: [api, web]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "## Code deploy summary" >> $GITHUB_STEP_SUMMARY
+          echo "- api: ${{ needs.api.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- web: ${{ needs.web.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- URL: https://app-hha-web-prod.azurewebsites.net" >> $GITHUB_STEP_SUMMARY
+          echo "- API: https://app-hha-api-prod.azurewebsites.net/health" >> $GITHUB_STEP_SUMMARY
