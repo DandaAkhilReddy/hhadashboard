@@ -136,7 +136,11 @@ jobs:
         run: |
           set -euo pipefail
           ip=$(curl -s https://api.ipify.org)
+          # Postgres firewall rule names disallow '.', so we keep both: ip
+          # for the rule values and iddashed for the rule name.
+          iddashed=$(echo "$ip" | tr '.' '-')
           echo "ip=$ip" >> "$GITHUB_OUTPUT"
+          echo "iddashed=$iddashed" >> "$GITHUB_OUTPUT"
           echo "::notice::Runner IP for this run: $ip"
 
       - name: Open Postgres firewall to runner
@@ -145,7 +149,7 @@ jobs:
           az postgres flexible-server firewall-rule create \
             -g rg-hha-dashboard-prod \
             --name psql-hha-prod \
-            --rule-name "seed-runner-${{ steps.ip.outputs.ip }}" \
+            --rule-name "seed-runner-${{ steps.ip.outputs.iddashed }}" \
             --start-ip-address "${{ steps.ip.outputs.ip }}" \
             --end-ip-address "${{ steps.ip.outputs.ip }}" >/dev/null
 
@@ -193,7 +197,7 @@ jobs:
           az postgres flexible-server firewall-rule delete \
             -g rg-hha-dashboard-prod \
             --name psql-hha-prod \
-            --rule-name "seed-runner-${{ steps.ip.outputs.ip }}" \
+            --rule-name "seed-runner-${{ steps.ip.outputs.iddashed }}" \
             --yes >/dev/null || true
 
       - name: Summary
