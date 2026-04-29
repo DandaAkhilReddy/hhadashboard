@@ -153,6 +153,18 @@ jobs:
             --start-ip-address "${{ steps.ip.outputs.ip }}" \
             --end-ip-address "${{ steps.ip.outputs.ip }}" >/dev/null
 
+      - name: Run alembic migrations
+        working-directory: hha-dashboard/api
+        env:
+          PG_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD_PROD }}
+        run: |
+          set -euo pipefail
+          # alembic env.py reads DATABASE_URL_SYNC (psycopg). Schema creation
+          # MUST run before any seed step — startup-time alembic from the api
+          # container has been racing with cold-start timeouts.
+          export DATABASE_URL_SYNC="postgresql+psycopg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?sslmode=require"
+          alembic upgrade head
+
       - name: Seed sites
         if: ${{ inputs.seed_sites }}
         working-directory: hha-dashboard/api
