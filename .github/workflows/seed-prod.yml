@@ -160,6 +160,9 @@ jobs:
           PG_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD_PROD }}
         run: |
           set -euo pipefail
+          # asyncpg uses ?ssl=require; psycopg uses ?sslmode=require.
+          # Set both — different scripts use different drivers.
+          export DATABASE_URL="postgresql+asyncpg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?ssl=require"
           export DATABASE_URL_SYNC="postgresql+psycopg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?sslmode=require"
           python ../scripts/seed_sites.py
 
@@ -173,6 +176,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "::add-mask::$PORTAL_PW"
+          export DATABASE_URL="postgresql+asyncpg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?ssl=require"
           export DATABASE_URL_SYNC="postgresql+psycopg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?sslmode=require"
           python ../scripts/seed_census_credential.py --email "$PORTAL_EMAIL" --password "$PORTAL_PW"
           echo "seed_census_credential OK (password redacted)"
@@ -185,6 +189,7 @@ jobs:
           PG_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD_PROD }}
         run: |
           set -euo pipefail
+          export DATABASE_URL="postgresql+asyncpg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?ssl=require"
           export DATABASE_URL_SYNC="postgresql+psycopg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?sslmode=require"
           python ../scripts/seed_alert_subscriptions.py \
             --role exec --email "$ALERT_EMAIL" \
