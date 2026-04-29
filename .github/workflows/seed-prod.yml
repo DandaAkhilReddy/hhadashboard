@@ -133,13 +133,19 @@ jobs:
 
       - name: Seed sites
         if: ${{ inputs.seed_sites }}
+        env:
+          # Pass through env so bash sees $KUDU_USER (a clean ref) instead of
+          # the literal Kudu publishing username (which starts with `$app-...`
+          # and would trigger unbound-variable expansion under `set -u`).
+          KUDU_USER: ${{ steps.kudu.outputs.user }}
+          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
         run: |
           set -euo pipefail
           curl -fsS \
-            -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
+            -u "$KUDU_USER:$KUDU_PASS" \
             -X POST "https://app-hha-api-prod.scm.azurewebsites.net/api/command" \
             -H 'Content-Type: application/json' \
-            -d '{"command":"uv run python scripts/seed_sites.py","dir":"site/wwwroot"}' \
+            -d '{"command":"python scripts/seed_sites.py","dir":"site/wwwroot"}' \
             | tee seed-sites-output.json
           if [ "$(jq -r '.ExitCode' seed-sites-output.json)" != "0" ]; then
             echo "::error::seed_sites.py failed"
@@ -153,6 +159,8 @@ jobs:
         env:
           PORTAL_PW: ${{ inputs.portal_password }}
           PORTAL_EMAIL: ${{ inputs.portal_email }}
+          KUDU_USER: ${{ steps.kudu.outputs.user }}
+          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
         run: |
           set -euo pipefail
           # Mask the password immediately — before it can appear in any log line.
@@ -163,11 +171,11 @@ jobs:
           PAYLOAD=$(jq -n \
             --arg email "$PORTAL_EMAIL" \
             --arg pw "$PORTAL_PW" \
-            '{"command": ("uv run python scripts/seed_census_credential.py --email " + $email + " --password " + $pw), "dir": "site/wwwroot"}')
+            '{"command": ("python scripts/seed_census_credential.py --email " + $email + " --password " + $pw), "dir": "site/wwwroot"}')
           # Redirect response body to file and suppress stdout to prevent any
           # accidental password echo in the Kudu output body.
           curl -fsS \
-            -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
+            -u "$KUDU_USER:$KUDU_PASS" \
             -X POST "https://app-hha-api-prod.scm.azurewebsites.net/api/command" \
             -H 'Content-Type: application/json' \
             -d "$PAYLOAD" \
@@ -180,13 +188,17 @@ jobs:
 
       - name: Seed alert subscriptions
         if: ${{ inputs.seed_alert_subscriptions && inputs.alert_email != '' }}
+        env:
+          ALERT_EMAIL: ${{ inputs.alert_email }}
+          KUDU_USER: ${{ steps.kudu.outputs.user }}
+          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
         run: |
           set -euo pipefail
           PAYLOAD=$(jq -n \
-            --arg email "${{ inputs.alert_email }}" \
-            '{"command": ("uv run python scripts/seed_alert_subscriptions.py --role exec --email " + $email + " --categories all --frequency daily"), "dir": "site/wwwroot"}')
+            --arg email "$ALERT_EMAIL" \
+            '{"command": ("python scripts/seed_alert_subscriptions.py --role exec --email " + $email + " --categories all --frequency daily"), "dir": "site/wwwroot"}')
           curl -fsS \
-            -u "${{ steps.kudu.outputs.user }}:${{ steps.kudu.outputs.pass }}" \
+            -u "$KUDU_USER:$KUDU_PASS" \
             -X POST "https://app-hha-api-prod.scm.azurewebsites.net/api/command" \
             -H 'Content-Type: application/json' \
             -d "$PAYLOAD" \
