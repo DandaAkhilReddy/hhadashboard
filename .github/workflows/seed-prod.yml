@@ -118,97 +118,83 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Read Kudu publishing credentials
-        id: kudu
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install api dependencies
+        working-directory: hha-dashboard/api
         run: |
           set -euo pipefail
-          CREDS=$(az webapp deployment list-publishing-credentials \
-            -n app-hha-api-prod -g rg-hha-dashboard-prod \
-            --query '{u:publishingUserName,p:publishingPassword}' -o json)
-          echo "user=$(echo "$CREDS" | jq -r '.u')" >> $GITHUB_OUTPUT
-          # Mask the password before writing it to GITHUB_OUTPUT so it never
-          # appears in logs, even in ::debug:: output.
-          echo "::add-mask::$(echo "$CREDS" | jq -r '.p')"
-          echo "pass=$(echo "$CREDS" | jq -r '.p')" >> $GITHUB_OUTPUT
+          pip install --quiet uv
+          uv export --frozen --no-dev --format requirements-txt > requirements.txt
+          pip install --quiet -r requirements.txt
+
+      - name: Resolve runner IP
+        id: ip
+        run: |
+          set -euo pipefail
+          ip=$(curl -s https://api.ipify.org)
+          echo "ip=$ip" >> "$GITHUB_OUTPUT"
+          echo "::notice::Runner IP for this run: $ip"
+
+      - name: Open Postgres firewall to runner
+        run: |
+          set -euo pipefail
+          az postgres flexible-server firewall-rule create \
+            -g rg-hha-dashboard-prod \
+            --name psql-hha-prod \
+            --rule-name "seed-runner-${{ steps.ip.outputs.ip }}" \
+            --start-ip-address "${{ steps.ip.outputs.ip }}" \
+            --end-ip-address "${{ steps.ip.outputs.ip }}" >/dev/null
 
       - name: Seed sites
         if: ${{ inputs.seed_sites }}
+        working-directory: hha-dashboard/api
         env:
-          # Pass through env so bash sees $KUDU_USER (a clean ref) instead of
-          # the literal Kudu publishing username (which starts with `$app-...`
-          # and would trigger unbound-variable expansion under `set -u`).
-          KUDU_USER: ${{ steps.kudu.outputs.user }}
-          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
+          PG_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD_PROD }}
         run: |
           set -euo pipefail
-          curl -fsS \
-            -u "$KUDU_USER:$KUDU_PASS" \
-            -X POST "https://app-hha-api-prod.scm.azurewebsites.net/api/command" \
-            -H 'Content-Type: application/json' \
-            -d '{"command":"python scripts/seed_sites.py","dir":"site/wwwroot"}' \
-            | tee seed-sites-output.json
-          if [ "$(jq -r '.ExitCode' seed-sites-output.json)" != "0" ]; then
-            echo "::error::seed_sites.py failed"
-            jq -r '.Error' seed-sites-output.json
-            exit 1
-          fi
-          echo "seed_sites OK"
+          export DATABASE_URL_SYNC="postgresql+psycopg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?sslmode=require"
+          python ../scripts/seed_sites.py
 
       - name: Seed portal credential
         if: ${{ inputs.seed_portal_credential && inputs.portal_password != '' }}
+        working-directory: hha-dashboard/api
         env:
           PORTAL_PW: ${{ inputs.portal_password }}
           PORTAL_EMAIL: ${{ inputs.portal_email }}
-          KUDU_USER: ${{ steps.kudu.outputs.user }}
-          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
+          PG_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD_PROD }}
         run: |
           set -euo pipefail
-          # Mask the password immediately — before it can appear in any log line.
           echo "::add-mask::$PORTAL_PW"
-          # Build the Kudu JSON payload using jq so the password is never
-          # interpolated into a shell string that could be echoed or traced.
-          # jq --arg injects the value safely without shell expansion.
-          PAYLOAD=$(jq -n \
-            --arg email "$PORTAL_EMAIL" \
-            --arg pw "$PORTAL_PW" \
-            '{"command": ("python scripts/seed_census_credential.py --email " + $email + " --password " + $pw), "dir": "site/wwwroot"}')
-          # Redirect response body to file and suppress stdout to prevent any
-          # accidental password echo in the Kudu output body.
-          curl -fsS \
-            -u "$KUDU_USER:$KUDU_PASS" \
-            -X POST "https://app-hha-api-prod.scm.azurewebsites.net/api/command" \
-            -H 'Content-Type: application/json' \
-            -d "$PAYLOAD" \
-            | tee seed-cred-output.json > /dev/null
-          if [ "$(jq -r '.ExitCode' seed-cred-output.json)" != "0" ]; then
-            echo "::error::seed_census_credential.py failed (output suppressed to avoid password leak)"
-            exit 1
-          fi
+          export DATABASE_URL_SYNC="postgresql+psycopg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?sslmode=require"
+          python ../scripts/seed_census_credential.py --email "$PORTAL_EMAIL" --password "$PORTAL_PW"
           echo "seed_census_credential OK (password redacted)"
 
       - name: Seed alert subscriptions
         if: ${{ inputs.seed_alert_subscriptions && inputs.alert_email != '' }}
+        working-directory: hha-dashboard/api
         env:
           ALERT_EMAIL: ${{ inputs.alert_email }}
-          KUDU_USER: ${{ steps.kudu.outputs.user }}
-          KUDU_PASS: ${{ steps.kudu.outputs.pass }}
+          PG_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD_PROD }}
         run: |
           set -euo pipefail
-          PAYLOAD=$(jq -n \
-            --arg email "$ALERT_EMAIL" \
-            '{"command": ("python scripts/seed_alert_subscriptions.py --role exec --email " + $email + " --categories all --frequency daily"), "dir": "site/wwwroot"}')
-          curl -fsS \
-            -u "$KUDU_USER:$KUDU_PASS" \
-            -X POST "https://app-hha-api-prod.scm.azurewebsites.net/api/command" \
-            -H 'Content-Type: application/json' \
-            -d "$PAYLOAD" \
-            | tee seed-alert-output.json
-          if [ "$(jq -r '.ExitCode' seed-alert-output.json)" != "0" ]; then
-            echo "::error::seed_alert_subscriptions.py failed"
-            jq -r '.Error' seed-alert-output.json
-            exit 1
-          fi
-          echo "seed_alert_subscriptions OK"
+          export DATABASE_URL_SYNC="postgresql+psycopg://hhaadmin:${PG_PASSWORD}@psql-hha-prod.postgres.database.azure.com:5432/hha_dashboard?sslmode=require"
+          python ../scripts/seed_alert_subscriptions.py \
+            --role exec --email "$ALERT_EMAIL" \
+            --categories all --frequency daily
+
+      - name: Close Postgres firewall to runner
+        if: always()
+        run: |
+          set -euo pipefail
+          az postgres flexible-server firewall-rule delete \
+            -g rg-hha-dashboard-prod \
+            --name psql-hha-prod \
+            --rule-name "seed-runner-${{ steps.ip.outputs.ip }}" \
+            --yes >/dev/null || true
 
       - name: Summary
         if: always()
