@@ -1,5 +1,35 @@
 # Ventra meeting — questions for HHA dashboard data feed
 
+> **TL;DR**
+> Tech-to-tech call to lock in **how** Ventra delivers FL operations data so HHA can build Phase 2 dashboards. Three non-negotiables: (1) BAA in writing, (2) FL-only — never TX, (3) aggregates only — no PHI persisted.
+
+**Top 5 must-asks**
+
+1. BAA confirmed and Athenahealth coverage clear — see §1
+2. Pick one of four delivery shapes: pre-aggregated CSV / claim-level CSV / API / EDI 835 — see §3
+3. Field grain agreed for `fact_collections_daily`, `fact_ar_snapshot`, `fact_revenue_by_physician_mo` — see §4
+4. Sample / sandbox feed date committed — see §6.3, §8.1
+5. Reconciliation acceptance criterion ($1K threshold or alternative) — see §5.5
+
+## Decision tracker (fill in during the meeting)
+
+- [ ] BAA confirmed in writing — *Ventra to send*
+- [ ] Athena BAA chain clarified
+- [ ] Delivery shape: ☐ (a) pre-agg CSV ☐ (b) claim CSV ☐ (c) API ☐ (d) EDI
+- [ ] Cadence: ___________ (daily / weekly / monthly), finalized by ____ CT
+- [ ] Auth: ☐ SFTP + SSH key + IP allowlist ☐ OAuth ☐ mTLS
+- [ ] Field list signed off (3 fact tables)
+- [ ] Sample-feed date: ____________
+- [ ] First-prod-delivery date: ____________
+- [ ] All-FL date: ____________
+- [ ] Single Ventra technical POC: ____________ (email: ____________)
+- [ ] Schema-change notification window: ___ days
+- [ ] Reconciliation threshold: $ ____ per site per month
+- [ ] Sandbox environment: ☐ yes ☐ no
+- [ ] Audit-log access on request: ☐ yes ☐ no
+
+---
+
 **Meeting:** Tue 2026-05-05 · 11:00 AM CST · "HHA / Ventra — Review Reporting Needs"
 **Format:** tech-to-tech
 **Ventra attendees:** David Reck (CTO & Chief Data Officer), Suma Bhat (VP Data & Analytics), Darshan Patel, Client Success
@@ -21,9 +51,9 @@ State up front:
 
 ---
 
-## 1. BAA, scope, and contractual gates (ASK FIRST — Phase 2 is gated on these)
+## 1. BAA, scope, and contractual gates
 
-> If any of §1 isn't a clean "yes," everything else can be deferred.
+> ⚠ **ASK FIRST.** If §1 doesn't get clean answers, defer everything else.
 
 | # | Question | Why it matters |
 |---|---|---|
@@ -34,9 +64,11 @@ State up front:
 | 1.5 | Data retention on your side — how long do you hold HHA's raw RCM data, and what's the deletion process if HHA terminates? | Right-to-delete language in BAA. |
 | 1.6 | Is there a **standard data-sharing addendum** (DUA / DPA) between you and clients, or do we negotiate this fresh? | Sets the legal frame for the rest. |
 
+**Notes:**
+
 ---
 
-## 2. Scope confirmation (the FL-only invariant)
+## 2. Scope confirmation — the FL-only invariant
 
 | # | Question | Why it matters |
 |---|---|---|
@@ -46,9 +78,13 @@ State up front:
 | 2.4 | Are there any sites where you only manage **part** of the RCM workflow (e.g. AR follow-up but not posting)? | Affects which metrics you're authoritative on vs. another vendor. |
 | 2.5 | Does the feed cover **all payers**, or are self-pay / non-contracted carriers excluded? | Net-collection-rate denominator depends on this. |
 
+**Notes:**
+
 ---
 
-## 3. Data delivery shape (THE big technical decision today)
+## 3. Data delivery shape
+
+> 🎯 **Biggest technical decision of the meeting.** Goal: leave with one of (a)/(b)/(c)/(d) chosen.
 
 We've designed for **four possible delivery shapes** — pick one. Each has different work on our side. The cleanest for HHA is option (a); option (d) is the most work.
 
@@ -67,7 +103,7 @@ We've designed for **four possible delivery shapes** — pick one. Each has diff
 |---|---|
 | 3.1 | **Which of (a)/(b)/(c)/(d) is your standard delivery for clients of HHA's size?** Do you also support a custom shape if (a) is preferred? |
 | 3.2 | If pre-aggregated (option a): can you commit to an **agreed schema** (column list + types + aggregation grain) that we both freeze in writing, with notice-of-change windows? |
-| 3.3 | If claim-level (b/c/d): can you guarantee that the feed **never includes** the following fields, or, if it does, that we are contractually permitted to discard them? `patient_first_name`, `patient_last_name`, `patient_dob`, `mrn`, `member_id`, `subscriber_*`, `guarantor_*`, `claim_id` (if used as a stable identifier across deliveries — we never persist this either way) |
+| 3.3 | If claim-level (b/c/d): can you guarantee the feed never includes any of the forbidden fields below — or, if it does, that we are contractually permitted to discard them?<br>**Forbidden:** `patient_first_name`, `patient_last_name`, `patient_dob`, `mrn`, `member_id`, `subscriber_*`, `guarantor_*`, `claim_id` (we never persist either way) |
 | 3.4 | Cadence — daily / weekly / monthly? At what time of day (CT) is data finalized? |
 | 3.5 | Authentication — for SFTP, do you do mutual SSH-key auth + IP allowlist? For API, OAuth 2.0 client credentials, or static API key? |
 | 3.6 | Are deliveries **incremental** (only new since last cursor) or **full snapshot**? If full snapshot, what's the rolling window (e.g. last 90 days)? |
@@ -75,6 +111,8 @@ We've designed for **four possible delivery shapes** — pick one. Each has diff
 | 3.8 | **File format guarantees** — UTF-8? Header row? Field delimiter? Date format ISO-8601 or American? Numbers locale-formatted (`1,234.56`) or raw (`1234.56`)? |
 | 3.9 | **Sample data** — can you send us 2–3 representative files (de-identified or test data) **this week** so we can build the parser before Phase 2 starts? |
 | 3.10 | **Schema version** — is your delivery schema versioned? When you add fields or change types, what's the notification process? |
+
+**Notes:**
 
 ---
 
@@ -97,8 +135,10 @@ Aggregation grain: **(date, state, payer_bucket, site_id, source_system)**
 | `refunds` | Refunds issued. |
 | `net_revenue` | Computed by you, or we compute? Confirm formula. |
 
-**Question 4.1.a:** can you provide that exact grain, or only at a coarser level (e.g. monthly, or no payer split)?
-**Question 4.1.b:** is `payer_bucket` something you can map for us, or do we get raw payer codes and bucket on our side?
+**Open questions:**
+
+- Can you provide that exact grain, or only at a coarser level (e.g. monthly, or no payer split)?
+- Is `payer_bucket` something you can map for us, or do we get raw payer codes and bucket on our side?
 
 ### 4.2 Finance board — `fact_ar_snapshot`
 
@@ -111,9 +151,11 @@ Aggregation grain: **(snapshot_date, state, site_id, aging_bucket)**
 | `aging_bucket` | 5 buckets: `0-30`, `31-60`, `61-90`, `91-120`, `120+`. |
 | `outstanding_amount` | $ in that bucket on that snapshot. |
 
-**Question 4.2.a:** do you produce AR snapshots **daily** or only **month-end**? Daily is the dashboard goal; month-end is workable for v1.
-**Question 4.2.b:** how do you treat **credit balances** — are they pulled out into a separate bucket?
-**Question 4.2.c:** **Days in A/R** (rolling 90d denominator) — can you compute and send, or do we compute from the daily collections + AR snapshot?
+**Open questions:**
+
+- Do you produce AR snapshots **daily** or only **month-end**? Daily is the dashboard goal; month-end is workable for v1.
+- How do you treat **credit balances** — pulled out into a separate bucket?
+- **Days in A/R** (rolling 90d denominator) — can you compute and send, or do we compute from daily collections + AR snapshot?
 
 ### 4.3 Doctor Scorecards — `fact_revenue_by_physician_mo`
 
@@ -130,9 +172,11 @@ Aggregation grain: **(month, state, physician_npi)**
 | `revenue_attributed` | Net revenue attributed to this MD's encounters in the month. |
 | `documentation_timestamps` | Per-encounter `note_started_at` / `note_signed_at` aggregated to: median chart-turnaround hours, % notes signed within 24h. |
 
-**Question 4.3.a:** can you compute documentation/turnaround on your side, or do we need raw encounter timestamps? **Strong preference: aggregate on your side** — fewer hops, no PHI risk.
-**Question 4.3.b:** for **net revenue per encounter** attribution, do you use the rendering provider, supervising provider, or a different rule? We want the rule documented.
-**Question 4.3.c:** any provider currently **not** being attributed correctly (e.g. locums billed under a supervising MD)? We need to know exclusions.
+**Open questions:**
+
+- Can you compute documentation/turnaround on your side, or do we need raw encounter timestamps? **Strong preference: aggregate on your side** — fewer hops, no PHI risk.
+- For **net revenue per encounter** attribution, do you use the rendering provider, supervising provider, or a different rule? We want the rule documented.
+- Any provider currently **not** being attributed correctly (e.g. locums billed under a supervising MD)? We need to know exclusions.
 
 ### 4.4 What we don't need (please don't send)
 
@@ -145,6 +189,8 @@ To shrink the HIPAA footprint: do **not** send any of these.
 - 835 line items with patient identifiers
 - Charge-lag / clean-claim-rate / timely-filing — Ventra owns these metrics
 - HCAHPS, patient satisfaction, portal adoption — out of scope
+
+**Notes:**
 
 ---
 
@@ -160,6 +206,8 @@ To shrink the HIPAA footprint: do **not** send any of these.
 | 5.6 | If HHA's totals diverge from yours by more than the threshold, what's the **diagnostic process** — do we open a ticket? Who looks at it on your side? |
 | 5.7 | **Late-posting handling** — when a payment posts in May for a service in March, where does it count in the dashboard view? (Cash basis = May; service-date basis = March.) Confirm Ventra's choice; we'll mirror it. |
 
+**Notes:**
+
 ---
 
 ## 6. Operations and support
@@ -173,6 +221,8 @@ To shrink the HIPAA footprint: do **not** send any of these.
 | 6.5 | Onboarding kickoff — once we agree the shape, what's a realistic timeline for the first delivery to land in our test environment? Two weeks? Four? |
 | 6.6 | Documentation — is there a **data dictionary** PDF / portal we can reference? (We'd like one if not — happy to draft one based on this meeting and have you confirm.) |
 
+**Notes:**
+
 ---
 
 ## 7. Security and audit
@@ -184,6 +234,8 @@ To shrink the HIPAA footprint: do **not** send any of these.
 | 7.3 | **Audit trail** — do you log every read of HHA's data on your side? How long is that log retained, and is it accessible to HHA on request? |
 | 7.4 | **Encryption** — are files encrypted at rest with HHA-specific keys, or shared infrastructure keys? |
 | 7.5 | Anyone else on Ventra's side who has read access to HHA's data set (e.g. your client-success team)? Need a list for our compliance file. |
+
+**Notes:**
 
 ---
 
@@ -198,6 +250,8 @@ To shrink the HIPAA footprint: do **not** send any of these.
 | 8.3 | What date for **all FL facilities** in the feed? |
 | 8.4 | Is there a per-client onboarding fee or per-feed cost we should plan for? |
 
+**Notes:**
+
 ---
 
 ## 9. Doctor Scorecards — sensitive sub-discussion
@@ -210,6 +264,8 @@ To shrink the HIPAA footprint: do **not** send any of these.
 | 9.2 | If we get a **dispute** ("my encounter count is wrong"), what's the back-trace — can we get an investigative drilldown without persistent PHI? |
 | 9.3 | Locums / contractors billed under a supervising MD — confirm attribution rule. We'll document this on the dashboard tile so users know. |
 | 9.4 | Are there providers Ventra is **not authoritative on** (e.g. employed by an entity Ventra doesn't bill for)? They go to the manual-entry path. |
+
+**Notes:**
 
 ---
 
@@ -241,11 +297,11 @@ Aim to leave the meeting with **written agreement** (or a follow-up email with s
 
 ---
 
-## 12. Reference (do not read aloud — for your prep only)
+## 12. Reference (prep-only — don't read aloud)
 
 **Our HIPAA firewall** (per ADR-001):
 
-```
+```text
 for each raw record from Ventra:
     validate against expected shape
     strip any forbidden field (patient_*, member_id, mrn, subscriber_*, guarantor_*)
@@ -259,13 +315,21 @@ shred raw file from Blob after 30 days (lifecycle policy)
 ```
 
 **Forbidden columns** (CI-enforced — never persisted):
-`claim_id`, `encounter_id`, `dos_per_line`, `cpt_per_line`, `patient_*`, `mrn`, `member_id`, `subscriber_*`, `guarantor_*`
 
-**Source of truth in our schema:** every row from Ventra is tagged `source_system = 'VENTRA_FL_ATHENA'`. TX rows (manual) are tagged `source_system = 'HHA_TX_MANUAL'`. The two never mix.
+- `claim_id`
+- `encounter_id`
+- `dos_per_line`
+- `cpt_per_line`
+- `patient_*`
+- `mrn`
+- `member_id`
+- `subscriber_*`
+- `guarantor_*`
 
-**Our scope split** (ADR-005): FL = Ventra-automated, TX = manual-only. Ventra has zero TX data.
+**Source-system invariant:** every row from Ventra is tagged `source_system = 'VENTRA_FL_ATHENA'`. TX rows (manual) are tagged `source_system = 'HHA_TX_MANUAL'`. The two never mix.
+
+**Scope split** (ADR-005): FL = Ventra-automated, TX = manual-only. Ventra has zero TX data.
 
 ---
 
-_Document owner: Akhil Reddy_
-_Created 2026-05-04 for the 2026-05-05 meeting._
+*Owner: Akhil Reddy · Created 2026-05-04 for the 2026-05-05 meeting · v2*
