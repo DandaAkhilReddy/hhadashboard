@@ -31,11 +31,138 @@
 ---
 
 **Meeting:** Tue 2026-05-05 · 11:00 AM CST · "HHA / Ventra — Review Reporting Needs"
+**Duration:** 30 minutes (drives the agenda below — anything not landed becomes follow-up email)
 **Format:** tech-to-tech
 **Ventra attendees:** David Reck (CTO & Chief Data Officer), Suma Bhat (VP Data & Analytics), Darshan Patel, Client Success
-**HHA attendee:** Akhil Reddy (+ optional HHA leaders)
+**HHA attendee:** Akhil Reddy (IT Director / Solution Architect, +optional HHA leaders)
 
-> **Goal of the meeting:** confirm exactly how Ventra will deliver Florida operations data so HHA can build the Phase 2 dashboards (Finance board FL tiles + Doctor Scorecards). Walk away with a single decision on the four ingestion shapes in §3, plus written sign-off on BAA, scope, and SLA.
+> **Goal:** confirm how Ventra will deliver **Florida-only** operations data so HHA can build the Phase 2 dashboards (Finance FL + Doctor Scorecards). Leave with one of the four shapes in §3 chosen, BAA + scope confirmed, sample-feed date committed.
+
+---
+
+## 30-minute agenda
+
+| Time | Block | Goal | Reference |
+|---|---|---|---|
+| 0:00 – 0:03 | Opener + frame | Set the three non-negotiables (FL-only, no PHI, BAA-in-place) | §0 |
+| 0:03 – 0:08 | BAA + scope | Confirm BAA + Athena chain + Florida facility list | §1 + §2 |
+| 0:08 – 0:15 | **Delivery shape decision** | **Pick (a) / (b) / (c) / (d).** This is the meeting's main outcome | §3 |
+| 0:15 – 0:22 | Field grain | Walk the 3 fact tables. Ventra confirms what they can / can't deliver | §4 |
+| 0:22 – 0:27 | Operations | POC, sandbox, sample date, reconciliation threshold | §5.5, §6.1, §6.3, §8.1 |
+| 0:27 – 0:30 | Wrap | Run through the Decision tracker, agree action-item owners | §10 |
+
+> If a block runs long, skip the next block's "nice-to-have" questions (marked *NTH* below) and move on. Cuts go into the follow-up email.
+
+---
+
+## Strategic questions (sprinkle in — they reveal more than tactical ones)
+
+Architect-level prompts for breathing-room moments or when an answer is vague:
+
+1. **"From your experience with similar dashboard projects, what's the #1 thing that goes wrong on the integration side?"** — invites a war story; surfaces hidden risk.
+2. **"Do you have a reference architecture or standard pattern for clients building exec dashboards from your data?"** — if yes, adopt it; if no, we set the pattern.
+3. **"What's on your data-platform roadmap for the next 6–12 months that would affect this feed?"** — protects against a schema break right after we ship.
+4. **"How do other clients reconcile your numbers against their internal accounting?"** — proven workflows beat improvising ours.
+5. **"When something goes wrong with the feed, who owns it on your side, and how is HHA notified?"** — defines the operational contract.
+6. **"What do you need from us to make this successful?"** — turns the conversation collaborative; often surfaces a setup task we'd otherwise miss.
+
+---
+
+## Per-block question bank (with anticipated answers + follow-ups)
+
+### Block 1 (0:03 – 0:08) — BAA + scope
+
+**Q1: Is the HHA ↔ Ventra BAA signed and current?**
+
+- Yes → "Great — can you email a copy / written confirmation to areddy@hhamedicine.com today?" Move on.
+- No / unsure → **red flag.** Ask: "What's the path to getting it signed? Who's the legal owner on your side?" Phase 2 is gated on this.
+
+**Q2: Does the BAA cover Athenahealth (the underlying PM) as a downstream component, or do we need a separate BAA with Athena?**
+
+- Covered downstream → ask for the language reference; document for compliance file.
+- Need separate Athena BAA → "Can you facilitate the Athena BAA, or do we contact Athena directly?"
+
+**Q3: Confirm Ventra services HHA's Florida hospitals only — never Texas?**
+
+- Confirmed → "Send the full list of HHA-FL facilities under contract — NPI + facility name + service line."
+- Some TX coverage → escalate; contradicts our scope (TX is manual-only).
+
+### Block 2 (0:08 – 0:15) — Delivery shape (the big decision)
+
+**Q4: Which of these four shapes is your standard delivery for clients of HHA's size?**
+
+| Likely Ventra answer | HHA follow-up |
+|---|---|
+| (a) Pre-aggregated CSV via SFTP — "monthly is standard, daily is custom" | "Daily preferred for an exec dashboard. What's the cost / lead time for daily?" |
+| (b) Claim-level CSV — "this is our default" | "We don't want claim-level. Can you aggregate before delivery? If not, confirm we can discard claim_id, MRN, etc. on receipt without breaching BAA." |
+| (c) REST API with claim-level | "OAuth or static API key? Rate limits? Pagination scheme? Sandbox available?" |
+| (d) 835 / 837 EDI | "We'd prefer (a) over EDI — EDI parsing is more code on our side. Is (a) on the table?" |
+
+**Q5: Cadence — daily / weekly / monthly? At what time of day (CT) is the data finalized?** _NTH if running long_
+
+- Monthly → "Is daily on the roadmap? Daily is what an exec dashboard needs."
+- Daily → "Posted by what time CT? We need it by 7 am for the morning digest."
+
+**Q6: Auth — SFTP + SSH key + IP allowlist? OAuth? mTLS?** *NTH*
+
+- Static API key → push for OAuth; static keys rotated only via service request are brittle.
+
+### Block 3 (0:15 – 0:22) — Field grain
+
+> Before this block, mention you've shared `VENTRA_DATA_REQUIREMENTS.md` so they're walking the same tables. If they didn't read it, take 60 sec to summarise the 3 fact tables verbally.
+
+**Q7: For `fact_collections_daily` — can you deliver at the grain (date, site, payer_bucket)?**
+
+- Yes → confirm field list (gross_charges, payments_received, adjustments, refunds, net_revenue).
+- Coarser only (monthly, no payer split) → "What's the lift to add daily and payer split? Config or new ETL?"
+- "We have raw — you aggregate" → expected if shape (b)/(c)/(d). Confirm raw fields.
+
+**Q8: For `fact_ar_snapshot` — daily snapshot or month-end only?**
+
+- Month-end only → workable for v1. "Is daily AR snapshot something you've built for other clients?"
+- Daily → "What time is the snapshot taken? End-of-business CT?"
+
+**Q9: For `fact_revenue_by_physician_mo` — can you provide encounters, RVU, attributed revenue, and aggregated note timestamps (chart turnaround) per physician per month?**
+
+- Yes → "What's your attribution rule — rendering provider, supervising provider, other?"
+- Partial (encounters yes, doc timestamps no) → flag what we can't get; scorecards will show "coming soon" for those tiles.
+- "We don't track docs / turnaround" → fall back: ask if Athena exposes it directly; revisit.
+
+### Block 4 (0:22 – 0:27) — Operations
+
+**Q10: Single technical POC for the data feed — name + email + on-hours?**
+
+- Always ask for a named human. "Client success team" is not a POC.
+
+**Q11: Sandbox / test environment with synthetic data — yes / no, when?**
+
+- Yes → "Can you send 2–3 sample files this week so we can build the parser in parallel?"
+- No → "Can you send a redacted sample of a real client's file?"
+
+**Q12: First sample-feed date and first prod-delivery date — what can you commit to?**
+
+- Push for a calendar date, not "a few weeks." Write it in the tracker.
+
+**Q13: Reconciliation acceptance threshold — for any month, your Finance report and our dashboard agree within $1,000 per site. Does that match your expected accuracy?**
+
+- "Sure" → write it down; confirm via follow-up email.
+- "More like $5K" → negotiate; ask why the variance is that high (rounding? timing? source-of-truth ambiguity?).
+
+### Block 5 (0:27 – 0:30) — Wrap
+
+Walk the **Decision tracker** at the top of this doc, line by line. For each line: ☐ landed in meeting, ☐ follow-up email needed, ☐ blocker.
+
+Confirm:
+
+- Who sends what to whom by when (Ventra → HHA: BAA copy, facility list, sample files)
+- Next checkpoint date (target: +2 weeks for sample-feed verification)
+- Email subject line for the recap: `HHA × Ventra dashboard data feed — action items from 2026-05-05`
+
+---
+
+## Appendix — deeper question bank (parking lot / follow-up email)
+
+The sections below are the full question set. The 30-minute agenda above pulls the highest-leverage subset. Anything cut from the live meeting goes into the follow-up email — keep these sections handy on a second monitor or print them out.
 
 ---
 
