@@ -8,6 +8,58 @@ HHA Medicine Operations Dashboard — an Azure-only, HIPAA-first analytics platf
 
 Build plan lives in [DASHBOARD_PLAN.md](../DASHBOARD_PLAN.md) (root of the OneDrive project folder). System architecture in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). ADRs live in [docs/adr/](docs/adr/). Operational procedures in [docs/RUNBOOK.md](docs/RUNBOOK.md). Day-1 setup checklist in [docs/ONBOARDING.md](docs/ONBOARDING.md). Read all five before any significant work.
 
+## Prod deploy state — 2026-05-04 (resume after 4-day pause)
+
+Phase 1 census-portal pipeline is **live in prod**. Both App Services serving, DB seeded, credentials freshly rotated. PR #46 (`feat/azure-deploy-push` → `main`) is open and tracks the deploy work — do not merge until the operator is back with eyes on prod.
+
+**Live URLs**
+
+- API: `https://app-hha-api-prod.azurewebsites.net` (`/health` and `/ready` both 200; `/ready` returns `{db:ok, schema:ok, audit_trigger:ok, sites:ok}`)
+- Web: `https://app-hha-web-prod.azurewebsites.net` (auth gate redirect working, `/api/auth/me` 401 unauth)
+- Custom domain `pulse.hhamedicine.com` not yet bound (see follow-ups).
+
+**Resource group: `rg-hha-dashboard-prod` (centralus)**
+
+Cost-tuned for ≤20 users: ~$35/mo target. SKUs are deliberately degraded from the original prod profile because the subscription is offer-restricted (no GP_Standard postgres, no Standard ACR). The `enable_*` flags in `infra/env/prod.bicepparam` document what's off:
+
+| Component | Setting |
+|---|---|
+| Postgres | `Standard_B1ms` (Burstable), single AZ |
+| App plan | `B1` (Basic), `worker_count=1` |
+| VNet | `enable_vnet=false` (Postgres firewall + KV public-ACL) |
+| ACR | `enable_acr=false` |
+| Container Apps Jobs | `enable_container_jobs=false` |
+| Storage | `Standard_LRS` |
+
+**Key Vault: `kv-hha-prod2`** — original `kv-hha-prod` is soft-delete-locked for 90 days. `enable_kv_purge_protection=false` for now (so the next clean redeploy isn't blocked); flip back to `true` once stable.
+
+**Database connection strings**
+
+App settings on `app-hha-api-prod` carry **literal** `DATABASE_URL` and `DATABASE_URL_SYNC` (not KV references) — a debugging detour during the deploy push. They look identical except for one critical difference:
+
+- `DATABASE_URL` (asyncpg): `?ssl=require`
+- `DATABASE_URL_SYNC` (psycopg): `?sslmode=require`
+
+**These are not interchangeable.** Asyncpg's `connect()` rejects `sslmode=` as an unknown kwarg and `/ready` returns 500. This bit us once already — preserve the distinction.
+
+**Postgres firewall** — currently has `AllowAllAzureServices` (0.0.0.0). Tightening is on the follow-up list once VNet integration is back.
+
+**Credentials**
+
+- Postgres admin pw + web `SESSION_SECRET` rotated 2026-05-04 19:30 UTC. Live values in KV (`kv-hha-prod2`) and GitHub Actions secret `POSTGRES_ADMIN_PASSWORD_PROD`. Never paste into chat — earlier values were echoed during debugging, which is what prompted the rotation.
+- Portal credential: `portal@hhamedicine.com` (login). Treat the password as one-shot — rotate on first interactive use through `infra/census_seed.sh` or `scripts/seed_census_credential.py`.
+- Database has `azure.extensions=BTREE_GIST` allow-listed (the 0001 migration needs it). Set via `az postgres flexible-server parameter set`.
+
+**Pending follow-ups (next session, in priority order)**
+
+1. **Browser sign-in test** — open the web URL, sign in with portal cred, save a census row, verify it lands in operations board + audit log.
+2. **Custom domain + managed TLS** — CNAME `pulse.hhamedicine.com` → `app-hha-web-prod.azurewebsites.net`, then `az webapp config hostname add` + `az webapp config ssl create`.
+3. **Re-enable KV purge protection** — flip `enable_kv_purge_protection=true` in `infra/env/prod.bicepparam`, redeploy.
+4. **Tighten Postgres firewall** — drop AllowAllAzureServices, switch to VNet integration once subscription quota allows GP_Standard postgres.
+5. **Migrate `DATABASE_URL` back to KV references** — only after the firewall change above lands cleanly.
+
+The deploy push lessons that don't fit elsewhere are captured here too: Postgres extensions need explicit allow-listing, `az.cmd` over WSL has interop pitfalls (use tempfiles instead of pipes, `wslpath -w` for body files), `npm prune --production` on Next.js 15 breaks `next start` because `.bin/next` is a relative-symlink shim that loses targets when devDeps go.
+
 **Authoritative ADRs (in priority order):**
 
 - [ADR-001 — HIPAA data classification](docs/adr/001-hipaa-data-classification.md) — column-level `data_class` rules, no-PHI invariant, BAA inventory
@@ -252,4 +304,4 @@ python scripts/restore-drill.sh
 
 Ask Akhil. Don't guess on HIPAA boundaries. Don't guess on comp visibility rules. Don't guess on whether a metric is HHA's or Ventra's (if you can't tell, it's Ventra's).
 
-_Last updated: 2026-04-23 · v5 plan locked, Week 0 starting_
+_Last updated: 2026-05-04 · Phase 1 census live in prod, 4-day pause_
