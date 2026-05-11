@@ -4,6 +4,11 @@ This is the document the on-call reads at 2 a.m. Keep it current.
 
 > **First-time reader:** start with [§ A. Quick orientation](#a-quick-orientation), then [§ B. First deploy procedure](#b-first-deploy-procedure-one-time-per-environment).
 > **Incident reader:** jump to [§ D. Incident playbooks](#d-incident-playbooks).
+>
+> **Sibling docs:**
+> - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — symptom → fix lookup for common dev + prod issues (lower severity)
+> - [SECURITY_INCIDENT_PLAYBOOK.md](SECURITY_INCIDENT_PLAYBOOK.md) — security-focused incidents (breach, credential compromise, ransomware). Includes credential rotation runbooks.
+> - [INDEX.md](INDEX.md) — full doc map
 
 ---
 

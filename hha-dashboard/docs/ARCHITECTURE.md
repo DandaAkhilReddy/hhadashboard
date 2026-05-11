@@ -3,6 +3,8 @@
 > The canonical architecture entry point. Read this first.
 >
 > Companions: [DASHBOARD_PLAN.md](../../DASHBOARD_PLAN.md) (what + why · scope), [docs/ONBOARDING.md](ONBOARDING.md) (day-1 setup checklist), [docs/RUNBOOK.md](RUNBOOK.md) (operational procedures), [docs/adr/](adr/) (locked architectural decisions). This doc is the **how** — every component, every data flow, every wire.
+>
+> **For visual diagrams** of every component and data flow, see [DIAGRAMS.md](DIAGRAMS.md) (10 Mermaid diagrams). **For the full doc map:** [INDEX.md](INDEX.md).
 
 ---
 

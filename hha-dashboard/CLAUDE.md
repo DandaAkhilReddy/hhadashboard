@@ -1,6 +1,8 @@
 # CLAUDE.md — HHA Dashboard
 
 > Every Claude Code session reads this file first. It is the contract. If it conflicts with anything else, this wins.
+>
+> **For the doc map:** see [docs/INDEX.md](docs/INDEX.md) — entry point to all 17 handoff docs (executive overview, diagrams, board specs, glossary, etc.)
 
 ## What this project is
 
