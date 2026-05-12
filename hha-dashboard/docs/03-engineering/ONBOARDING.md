@@ -1,6 +1,6 @@
 # Onboarding — HHA Dashboard
 
-> Audience: a new contributor (engineer or solo Akhil-on-a-fresh-machine) coming to the codebase cold. Goal: clone → green local stack → first PR shipped within a working day. Read this **after** [CLAUDE.md](../CLAUDE.md) (the contract) and [ARCHITECTURE.md](ARCHITECTURE.md) (the system).
+> Audience: a new contributor (engineer or solo Akhil-on-a-fresh-machine) coming to the codebase cold. Goal: clone → green local stack → first PR shipped within a working day. Read this **after** [CLAUDE.md](../../CLAUDE.md) (the contract) and [ARCHITECTURE.md](../02-architecture/ARCHITECTURE.md) (the system).
 
 ---
 
@@ -58,10 +58,10 @@ The repo root is `hhadashboard/` (not `hha-dashboard/`). The codebase lives unde
 
 Read **before any code changes**:
 
-1. [DASHBOARD_PLAN.md](../../DASHBOARD_PLAN.md) — § Scope (what's IN, what's OUT — never debate this without sponsor sign-off)
-2. [docs/adr/001-hipaa-data-classification.md](adr/001-hipaa-data-classification.md) — column-level data-class rules. Skipping this means CI rejects your first migration.
-3. [docs/adr/002-rbac-model.md](adr/002-rbac-model.md) — Entra groups → roles, `comp_viewer` additive flag.
-4. [ARCHITECTURE.md](ARCHITECTURE.md) — at least §1 (At a glance) + §6 (Auth + RBAC).
+1. [DASHBOARD_PLAN.md](../../../DASHBOARD_PLAN.md) — § Scope (what's IN, what's OUT — never debate this without sponsor sign-off)
+2. [docs/adr/001-hipaa-data-classification.md](../02-architecture/adr/001-hipaa-data-classification.md) — column-level data-class rules. Skipping this means CI rejects your first migration.
+3. [docs/adr/002-rbac-model.md](../02-architecture/adr/002-rbac-model.md) — Entra groups → roles, `comp_viewer` additive flag.
+4. [ARCHITECTURE.md](../02-architecture/ARCHITECTURE.md) — at least §1 (At a glance) + §6 (Auth + RBAC).
 
 ### 2. Bring up the local data stack
 
@@ -136,7 +136,7 @@ If any of these fail and you haven't touched the relevant code, your local envir
 
 1. Pick a small task — typo fix, docstring tighten, lint nag — and create a feature branch: `git checkout -b chore/<short-name>`.
 2. Make the change, run the relevant gates locally (§5).
-3. Commit per [commit conventions](../../CLAUDE.md#commit-conventions): `type(scope): description`, lowercase, imperative.
+3. Commit per [commit conventions](../../../CLAUDE.md#commit-conventions): `type(scope): description`, lowercase, imperative.
 4. Push: `git push -u origin chore/<short-name>`.
 5. `gh pr create` (or the GitHub UI) — fill out the PR template (HIPAA checklist + Test section).
 6. Wait for CI green. Self-review the diff. Squash-merge.
@@ -151,13 +151,13 @@ After Day-1's setup is rock solid, the next 4 days should focus on building enou
 
 ### Mon — Read the contracts
 
-- [CLAUDE.md](../CLAUDE.md) — full read. This is the contract; anything that conflicts with it loses.
-- [docs/RUNBOOK.md](RUNBOOK.md) — the 2 a.m. document. Skim now so you know where to look when paged.
-- All 5 ADRs in [docs/adr/](adr/). They're short, locked-in decisions — knowing them prevents you from re-litigating.
+- [CLAUDE.md](../../CLAUDE.md) — full read. This is the contract; anything that conflicts with it loses.
+- [docs/RUNBOOK.md](../04-operations/RUNBOOK.md) — the 2 a.m. document. Skim now so you know where to look when paged.
+- All 5 ADRs in [docs/adr/](../adr). They're short, locked-in decisions — knowing them prevents you from re-litigating.
 
 ### Tue — Walk the data flows
 
-- [ARCHITECTURE.md §5 (Data flows)](ARCHITECTURE.md#5-data-flows) — login, daily census submit, monthly finance entry, alert evaluation, Ventra ingest, Paycom sync.
+- [ARCHITECTURE.md §5 (Data flows)](../02-architecture/ARCHITECTURE.md#5-data-flows) — login, daily census submit, monthly finance entry, alert evaluation, Ventra ingest, Paycom sync.
 - For each one: locate the entry-point file (router or job) in `api/app/routers/` or `jobs/`. Trace the call to the DB. Identify which row(s) get written and which audit trigger fires.
 - Output: a private 1-page summary diagram for yourself. You'll consult it constantly.
 
@@ -173,7 +173,7 @@ After Day-1's setup is rock solid, the next 4 days should focus on building enou
 ### Thu — Pick a P3 ticket
 
 - `gh issue list --label="good-first-issue"` (or whatever the maintainer label is).
-- Anything in [docs/PROJECT_STATE_AUDIT.md](PROJECT_STATE_AUDIT.md) marked Phase 4+ that's not blocked is fair game.
+- Anything in [docs/PROJECT_STATE_AUDIT.md](../99-archive/PROJECT_STATE_AUDIT.md) marked Phase 4+ that's not blocked is fair game.
 - Spec it lightly in `.planning/<ticket>.md` (REQUIREMENTS → DESIGN → TASKS) and run it past the maintainer in a short Slack/email check before coding.
 
 ### Fri — Ship it
@@ -213,14 +213,14 @@ You probably already have a Postgres running locally outside Docker. Either stop
 
 ### "Playwright tests fail locally but I haven't touched anything"
 
-Most likely something else is on port 3101 (the Playwright Next dev port — see [web/playwright.config.ts](../web/playwright.config.ts)) or 8123 (the mock-api port). Kill those processes or override via `PLAYWRIGHT_APP_PORT` / `MOCK_API_PORT` env vars.
+Most likely something else is on port 3101 (the Playwright Next dev port — see [web/playwright.config.ts](../../web/playwright.config.ts)) or 8123 (the mock-api port). Kill those processes or override via `PLAYWRIGHT_APP_PORT` / `MOCK_API_PORT` env vars.
 
 ---
 
 ## Where to ask
 
 - **Build / scope questions** → Akhil (sponsor) directly. Don't guess on HIPAA boundaries or what's in/out of scope.
-- **HIPAA classification edge cases** → reread [ADR-001](adr/001-hipaa-data-classification.md) first. Then ask. If still unsure, default to the more restrictive tier (e.g., classify as Tier B not Tier A when uncertain).
+- **HIPAA classification edge cases** → reread [ADR-001](../02-architecture/adr/001-hipaa-data-classification.md) first. Then ask. If still unsure, default to the more restrictive tier (e.g., classify as Tier B not Tier A when uncertain).
 - **CI failures** → check the workflow run output first; the failing step name is usually self-explanatory. If not, paste the relevant lines into the PR thread before pinging.
 
 ---

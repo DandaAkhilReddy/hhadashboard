@@ -173,4 +173,4 @@ All require `exec` role.
 
 ---
 
-**Next read:** [GLOSSARY.md](../GLOSSARY.md) — definitions of every term used.
+**Next read:** [GLOSSARY.md](../../07-reference/GLOSSARY.md) — definitions of every term used.

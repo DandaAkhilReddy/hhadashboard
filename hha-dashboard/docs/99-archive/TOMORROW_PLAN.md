@@ -77,8 +77,8 @@ These don't move with code. Schedule them in parallel.
 
 1. **Sponsor email** — draft from earlier session at `docs/SPONSOR_EMAIL_DRAFT.md` (if committed). Send to CEO + CFO.
 2. **Azure subscription** — provision `hha-production` under HHA M365 tenant.
-3. **Entra app registrations** — `hha-dashboard-{web,api}-{dev,prod}` per [docs/ENTRA_SETUP.md](ENTRA_SETUP.md).
-4. **Entra security groups** — 7 groups per [ADR-002](adr/002-rbac-model.md).
+3. **Entra app registrations** — `hha-dashboard-{web,api}-{dev,prod}` per [docs/ENTRA_SETUP.md](../03-engineering/ENTRA_SETUP.md).
+4. **Entra security groups** — 7 groups per [ADR-002](../02-architecture/adr/002-rbac-model.md).
 5. **Ventra BAA** — confirm in writing. Gating for Phase 2 ingestion.
 6. **Paycom API access** — 4–6 week request window (started 2026-04-26).
 

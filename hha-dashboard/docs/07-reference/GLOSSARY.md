@@ -106,7 +106,7 @@
 | **`audit.upn` GUC** | Postgres session variable holding the user's email. Set per-request by the API; read by the audit trigger to attribute the change |
 | **comp_viewer** | Entra security group that grants ADDITIONAL visibility to `masters.comp_agreements` and the Below-FMV tile on People board. Orthogonal to `exec` role |
 | **data_class** | Column-level HIPAA classification tag (A/B/C/D). Stored in SQLAlchemy `info={}` dict. CI test enforces |
-| **Decision tracker** | Section at the top of [VENTRA_QUESTIONS.md](VENTRA_QUESTIONS.md) where action items get checked off during the vendor meeting |
+| **Decision tracker** | Section at the top of [VENTRA_QUESTIONS.md](../06-vendors/ventra/QUESTIONS.md) where action items get checked off during the vendor meeting |
 | **Exec gate** | Per ADR-005, a phase-boundary review that requires both co-sponsors (CEO + CFO) to sign off |
 | **HIPAA firewall** | The strip + aggregate pattern in `jobs/ventra_ingest/parse/option_b.py` that prevents PHI from entering Postgres |
 | **kiosk credential** | The shared portal password for census entry. One credential, all site leaders, used on shared workstations |
@@ -121,7 +121,7 @@
 | **ADR** (Architecture Decision Record) | A short, locked, dated document capturing a single architectural decision and its rationale. HHA has 5 ADRs in `docs/adr/` |
 | **Alembic** | Python migration framework for SQLAlchemy. HHA tracks Postgres schema changes here |
 | **Allowlist** | A closed set of permitted values. Safer than denylist for security boundaries (because new unknown items are excluded by default) |
-| **API contract** | The shape of an API endpoint (method, path, request body, response body). Documented in OpenAPI and [API_ENDPOINT_CATALOG.md](API_ENDPOINT_CATALOG.md) |
+| **API contract** | The shape of an API endpoint (method, path, request body, response body). Documented in OpenAPI and [API_ENDPOINT_CATALOG.md](../03-engineering/API_ENDPOINT_CATALOG.md) |
 | **asyncpg** | Async Postgres driver for Python (used by SQLAlchemy async). Uses `?ssl=require` URL syntax |
 | **psycopg** | Sync Postgres driver. Used by Alembic. Uses `?sslmode=require` URL syntax. **NOT interchangeable with asyncpg's URL format** |
 | **C4 model** | A 4-level diagramming convention for software architecture (Context, Container, Component, Code). HHA uses levels 1 + 2 |
@@ -140,7 +140,7 @@
 | **Pre-commit hook** | Git hook that runs before every commit. HHA's hook blocks forbidden column names |
 | **Quarantine** | A separate storage bucket where bad/unprocessable files go for manual review |
 | **RBAC** (Role-Based Access Control) | Authorization model where permissions are tied to roles, not individual users |
-| **Runbook** | Operational guide for known scenarios (e.g., "what to do when X happens"). HHA's is at [RUNBOOK.md](RUNBOOK.md) |
+| **Runbook** | Operational guide for known scenarios (e.g., "what to do when X happens"). HHA's is at [RUNBOOK.md](../04-operations/RUNBOOK.md) |
 | **SAS** (Shared Access Signature) | A temporary, scoped URL granting access to Azure Storage. Not currently used by HHA (Managed Identity preferred) |
 | **Session GUC** | See "GUC" above. Postgres session variable, lifetime = connection |
 | **Smoke test** | A quick end-to-end test to confirm a deploy is alive (vs full integration tests). HHA's is `scripts/smoke_deploy.sh` |
@@ -202,4 +202,4 @@
 
 ---
 
-**Next read:** [INDEX.md](INDEX.md) for the full doc map.
+**Next read:** [INDEX.md](../README.md) for the full doc map.

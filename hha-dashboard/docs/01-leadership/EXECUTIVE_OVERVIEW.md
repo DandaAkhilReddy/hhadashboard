@@ -71,7 +71,7 @@ HHA's data architecture is HIPAA-conscious by design.
 - **Encryption** at rest and in transit (TLS 1.2+).
 - **Ventra BAA** is being confirmed (gating Phase 2).
 
-Summary in [COMPLIANCE_POSTURE.md](COMPLIANCE_POSTURE.md). Engineering detail in [adr/001-hipaa-data-classification.md](adr/001-hipaa-data-classification.md).
+Summary in [COMPLIANCE_POSTURE.md](COMPLIANCE_POSTURE.md). Engineering detail in [adr/001-hipaa-data-classification.md](../02-architecture/adr/001-hipaa-data-classification.md).
 
 ## What's the risk
 
@@ -92,7 +92,7 @@ The biggest risk by far is **solo-engineer dependence**. This documentation set 
 | Day-to-day questions | Akhil Reddy, IT Director | areddy@hhamedicine.com |
 | System is down | Akhil first, then Azure support | Az support via portal |
 | Sponsor decisions / scope | HHA CEO + CFO | (per ADR-005, both co-sign) |
-| HIPAA incident | Akhil → HHA legal → Microsoft BAA contact | See [SECURITY_INCIDENT_PLAYBOOK.md](SECURITY_INCIDENT_PLAYBOOK.md) |
+| HIPAA incident | Akhil → HHA legal → Microsoft BAA contact | See [SECURITY_INCIDENT_PLAYBOOK.md](../04-operations/SECURITY_INCIDENT_PLAYBOOK.md) |
 
 ## What leadership should review
 

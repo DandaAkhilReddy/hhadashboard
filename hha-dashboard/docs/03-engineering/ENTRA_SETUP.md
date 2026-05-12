@@ -2,8 +2,8 @@
 
 The dashboard's API verifies access tokens issued by Microsoft Entra ID
 (formerly Azure AD). The verification code path is in
-[`api/app/services/entra_jwt.py`](../api/app/services/entra_jwt.py); it is
-exercised by [`api/tests/test_entra_jwt.py`](../api/tests/test_entra_jwt.py)
+[`api/app/services/entra_jwt.py`](../../api/app/services/entra_jwt.py); it is
+exercised by [`api/tests/test_entra_jwt.py`](../../api/tests/test_entra_jwt.py)
 with synthetic RSA keys.
 
 This document is the **Azure-side checklist** to make real auth work end-to-end.

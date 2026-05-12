@@ -8,7 +8,7 @@ This is the document the on-call reads at 2 a.m. Keep it current.
 > **Sibling docs:**
 > - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — symptom → fix lookup for common dev + prod issues (lower severity)
 > - [SECURITY_INCIDENT_PLAYBOOK.md](SECURITY_INCIDENT_PLAYBOOK.md) — security-focused incidents (breach, credential compromise, ransomware). Includes credential rotation runbooks.
-> - [INDEX.md](INDEX.md) — full doc map
+> - [INDEX.md](../README.md) — full doc map
 
 ---
 
@@ -27,7 +27,7 @@ A Next.js + FastAPI + PostgreSQL dashboard hosted entirely in **one Azure subscr
 
 ### What it doesn't talk to
 
-- No public API. No third-party SaaS in the data path. No clinical EHR. **No claim-level data ever lands in our DB** (per [ADR-001](adr/001-hipaa-data-classification.md)).
+- No public API. No third-party SaaS in the data path. No clinical EHR. **No claim-level data ever lands in our DB** (per [ADR-001](../02-architecture/adr/001-hipaa-data-classification.md)).
 
 ### Top-level health
 
@@ -62,8 +62,8 @@ Required external dependencies (must be done by humans, not from your laptop):
 
 - [ ] Azure subscription `hha-production` provisioned under HHA's M365 tenant
 - [ ] Operator has Owner on the subscription, or scoped Contributor + RBAC admin on the resource group
-- [ ] Two Entra app registrations: `hha-dashboard-web-{env}` and `hha-dashboard-api-{env}` ([docs/ENTRA_SETUP.md](ENTRA_SETUP.md))
-- [ ] Seven security groups created and populated ([ADR-002](adr/002-rbac-model.md))
+- [ ] Two Entra app registrations: `hha-dashboard-web-{env}` and `hha-dashboard-api-{env}` ([docs/ENTRA_SETUP.md](../03-engineering/ENTRA_SETUP.md))
+- [ ] Seven security groups created and populated ([ADR-002](../02-architecture/adr/002-rbac-model.md))
 - [ ] Ventra and Microsoft BAA confirmations on file
 
 When those are done, deploy in three phases:
@@ -203,7 +203,7 @@ Then sign in via the dashboard, confirm Operations renders 11 sites, and you're 
 
 ### Phase 5 — Lock the backups WORM policy
 
-After ~3 successful nightlies, follow the procedure in [ADR-004 § Part 3](adr/004-backup-and-disaster-recovery.md#part-3--worm-immutability-lock).
+After ~3 successful nightlies, follow the procedure in [ADR-004 § Part 3](../02-architecture/adr/004-backup-and-disaster-recovery.md#part-3--worm-immutability-lock).
 
 ---
 
@@ -211,7 +211,7 @@ After ~3 successful nightlies, follow the procedure in [ADR-004 § Part 3](adr/0
 
 ### Add or remove a dashboard user
 
-- **Add:** Entra portal → corresponding security group ([ADR-002](adr/002-rbac-model.md)) → add member. Effective on next sign-in.
+- **Add:** Entra portal → corresponding security group ([ADR-002](../02-architecture/adr/002-rbac-model.md)) → add member. Effective on next sign-in.
 - **Remove:** same group → remove member. JWTs cached up to 1h; for immediate revocation also restart the api App Service: `az webapp restart -n app-hha-api-${ENV} -g $RG`.
 - **Promote to comp_viewer:** add to `HHA-Dashboard-CompViewer`. CEO and CFO only by policy.
 
@@ -251,7 +251,7 @@ Order: change in KV first, then change on the server (app reads KV). Reverse ord
 ENV=prod bash scripts/restore_drill.sh
 ```
 
-Quarterly minimum. Also after every schema migration touching audited tables. See [ADR-004 § Part 4](adr/004-backup-and-disaster-recovery.md#part-4--restore-drill-the-proof).
+Quarterly minimum. Also after every schema migration touching audited tables. See [ADR-004 § Part 4](../02-architecture/adr/004-backup-and-disaster-recovery.md#part-4--restore-drill-the-proof).
 
 ### Apply a new migration in prod
 
@@ -329,7 +329,7 @@ az containerapp job logs show -n $JOB -g $RG --container <container-name> --exec
 SELECT email, failed_attempts, locked_until FROM auth.census_credentials;
 ```
 
-`locked_until > now()` means lockout in effect (10 fails / 15 min lock per [ADR-002](adr/002-rbac-model.md)).
+`locked_until > now()` means lockout in effect (10 fails / 15 min lock per [ADR-002](../02-architecture/adr/002-rbac-model.md)).
 
 **Fix:**
 
@@ -445,7 +445,7 @@ az containerapp job start -n job-pg-backup-prod -g $RG
 
 Watch execution. If it succeeds, you're back to normal — Azure Postgres Flex's managed backups still cover the missed window for restore.
 
-If it keeps failing past 48h, you've lost a day of the off-Azure escrow but the managed backup is intact (per [ADR-004](adr/004-backup-and-disaster-recovery.md)). Treat as P2, not P1.
+If it keeps failing past 48h, you've lost a day of the off-Azure escrow but the managed backup is intact (per [ADR-004](../02-architecture/adr/004-backup-and-disaster-recovery.md)). Treat as P2, not P1.
 
 ### D.7 "Audit log has rows with `__system__`"
 
@@ -458,7 +458,7 @@ WHERE changed_by_upn = '__system__'
   AND changed_at > now() - interval '1 hour';
 ```
 
-…returns nonzero. Per [ADR-003](adr/003-audit-chain.md), this means a mutation happened without the middleware setting the UPN ContextVar.
+…returns nonzero. Per [ADR-003](../02-architecture/adr/003-audit-chain.md), this means a mutation happened without the middleware setting the UPN ContextVar.
 
 **Possible causes:**
 
@@ -480,15 +480,15 @@ WHERE changed_by_upn = '__system__'
 
 ## F. Where to find more
 
-- **System overview** → [ARCHITECTURE.md](ARCHITECTURE.md)
-- **Day-1 environment setup** → [ONBOARDING.md](ONBOARDING.md)
-- **Why we made the calls we made** → [docs/adr/](adr/)
-- **Build plan + session history** → [SESSION_RECAP_*.md](.) and the build plan in `.claude/plans/`
-- **HIPAA classification** → [ADR-001](adr/001-hipaa-data-classification.md)
-- **RBAC model** → [ADR-002](adr/002-rbac-model.md)
-- **Audit trail** → [ADR-003](adr/003-audit-chain.md)
-- **Backup & DR** → [ADR-004](adr/004-backup-and-disaster-recovery.md)
-- **FL/TX scope split** → [ADR-005](adr/005-fl-tx-scope-split.md)
+- **System overview** → [ARCHITECTURE.md](../02-architecture/ARCHITECTURE.md)
+- **Day-1 environment setup** → [ONBOARDING.md](../03-engineering/ONBOARDING.md)
+- **Why we made the calls we made** → [docs/adr/](../adr)
+- **Build plan + session history** → [SESSION_RECAP_*.md](..) and the build plan in `.claude/plans/`
+- **HIPAA classification** → [ADR-001](../02-architecture/adr/001-hipaa-data-classification.md)
+- **RBAC model** → [ADR-002](../02-architecture/adr/002-rbac-model.md)
+- **Audit trail** → [ADR-003](../02-architecture/adr/003-audit-chain.md)
+- **Backup & DR** → [ADR-004](../02-architecture/adr/004-backup-and-disaster-recovery.md)
+- **FL/TX scope split** → [ADR-005](../02-architecture/adr/005-fl-tx-scope-split.md)
 
 ---
 

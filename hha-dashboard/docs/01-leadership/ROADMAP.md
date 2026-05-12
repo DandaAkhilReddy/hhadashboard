@@ -35,7 +35,7 @@
 
 **Engineering gate met:** deploy via `az deployment group create`; sign in via Microsoft; data persists; audit log captures changes; backup + restore drill works.
 
-**Reference:** [ARCHITECTURE.md](ARCHITECTURE.md), [adr/](adr/)
+**Reference:** [ARCHITECTURE.md](../02-architecture/ARCHITECTURE.md), [adr/](../adr)
 
 ---
 
@@ -55,7 +55,7 @@
 
 **Cost:** ~$35/mo on degraded SKUs (B1ms postgres, B1 app plan, no VNet, no ACR, no Container Apps Jobs)
 
-**Reference:** [PHASE_1_CENSUS_PORTAL.md](PHASE_1_CENSUS_PORTAL.md), [boards/OPERATIONS.md](boards/OPERATIONS.md)
+**Reference:** [PHASE_1_CENSUS_PORTAL.md](../05-product/PHASE_1_CENSUS_PORTAL.md), [boards/OPERATIONS.md](../05-product/boards/OPERATIONS.md)
 
 ---
 
@@ -87,7 +87,7 @@
 
 **Exec gate to enter Phase 3:** for a chosen month, Finance board agrees with Ventra's client report within $1,000 per site (or 0.5% of monthly collections, whichever is greater).
 
-**Reference:** [VENTRA_DATA_REQUIREMENTS.md](VENTRA_DATA_REQUIREMENTS.md), [INGESTION_VENTRA.md](INGESTION_VENTRA.md), [boards/FINANCE.md](boards/FINANCE.md), [boards/DOCTOR_SCORECARDS.md](boards/DOCTOR_SCORECARDS.md)
+**Reference:** [VENTRA_DATA_REQUIREMENTS.md](../06-vendors/ventra/DATA_REQUIREMENTS.md), [INGESTION_VENTRA.md](../03-engineering/INGESTION_VENTRA.md), [boards/FINANCE.md](../05-product/boards/FINANCE.md), [boards/DOCTOR_SCORECARDS.md](../05-product/boards/DOCTOR_SCORECARDS.md)
 
 ---
 
@@ -159,4 +159,4 @@ This document is the source of truth. If `DASHBOARD_PLAN.md` (in OneDrive) confl
 ---
 
 **Next read for leadership:** [COST_AND_CAPACITY.md](COST_AND_CAPACITY.md)
-**Next read for engineering:** [ARCHITECTURE.md](ARCHITECTURE.md)
+**Next read for engineering:** [ARCHITECTURE.md](../02-architecture/ARCHITECTURE.md)

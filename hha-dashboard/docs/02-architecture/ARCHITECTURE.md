@@ -2,9 +2,9 @@
 
 > The canonical architecture entry point. Read this first.
 >
-> Companions: [DASHBOARD_PLAN.md](../../DASHBOARD_PLAN.md) (what + why · scope), [docs/ONBOARDING.md](ONBOARDING.md) (day-1 setup checklist), [docs/RUNBOOK.md](RUNBOOK.md) (operational procedures), [docs/adr/](adr/) (locked architectural decisions). This doc is the **how** — every component, every data flow, every wire.
+> Companions: [DASHBOARD_PLAN.md](../../../DASHBOARD_PLAN.md) (what + why · scope), [docs/ONBOARDING.md](../03-engineering/ONBOARDING.md) (day-1 setup checklist), [docs/RUNBOOK.md](../04-operations/RUNBOOK.md) (operational procedures), [docs/adr/](../adr) (locked architectural decisions). This doc is the **how** — every component, every data flow, every wire.
 >
-> **For visual diagrams** of every component and data flow, see [DIAGRAMS.md](DIAGRAMS.md) (10 Mermaid diagrams). **For the full doc map:** [INDEX.md](INDEX.md).
+> **For visual diagrams** of every component and data flow, see [DIAGRAMS.md](DIAGRAMS.md) (10 Mermaid diagrams). **For the full doc map:** [INDEX.md](../README.md).
 
 ---
 
@@ -14,7 +14,7 @@ If you have **5 minutes**, read §1 (At a glance) — invariants, stack, one-pag
 
 If you have **30 minutes**, also read §2 (The five planes) and skim §6 (Roles + RBAC). You'll know who can see what and where each piece lives.
 
-If you're building or operating, read it cover-to-cover. Then bookmark [RUNBOOK.md](RUNBOOK.md) for incident playbooks and [ONBOARDING.md](ONBOARDING.md) for environment setup.
+If you're building or operating, read it cover-to-cover. Then bookmark [RUNBOOK.md](../04-operations/RUNBOOK.md) for incident playbooks and [ONBOARDING.md](../03-engineering/ONBOARDING.md) for environment setup.
 
 ### Table of contents
 
@@ -33,7 +33,7 @@ If you're building or operating, read it cover-to-cover. Then bookmark [RUNBOOK.
 - §13 [Decisions intentionally deferred](#13-decisions-intentionally-deferred)
 - §14 [Reference: file-to-component cross-walk](#14-reference-file-to-component-cross-walk)
 
-For day-1 environment setup, jump to [docs/ONBOARDING.md](ONBOARDING.md).
+For day-1 environment setup, jump to [docs/ONBOARDING.md](../03-engineering/ONBOARDING.md).
 
 ---
 
@@ -179,10 +179,10 @@ Separating by plane also maps to blast-radius control — a bug in the integrati
 
 | File | Role |
 |---|---|
-| [`web/middleware.ts`](../web/middleware.ts) | MSAL session check + Entra group → role mapping. Redirects unauthenticated to `/sign-in`; 403s role-blocked routes. |
-| [`web/lib/auth.ts`](../web/lib/auth.ts) *(Session 2)* | MSAL.js config, token acquisition, silent refresh |
-| [`web/lib/api-client.ts`](../web/lib/api-client.ts) | Typed `fetch()` wrappers that attach bearer token |
-| [`web/lib/api-types.ts`](../web/lib/api-types.ts) | **Generated** by `openapi-typescript` from `/openapi.json`. Never edited by hand. |
+| [`web/middleware.ts`](../../web/middleware.ts) | MSAL session check + Entra group → role mapping. Redirects unauthenticated to `/sign-in`; 403s role-blocked routes. |
+| [`web/lib/auth.ts`](../../web/lib/auth.ts) *(Session 2)* | MSAL.js config, token acquisition, silent refresh |
+| [`web/lib/api-client.ts`](../../web/lib/api-client.ts) | Typed `fetch()` wrappers that attach bearer token |
+| [`web/lib/api-types.ts`](../../web/lib/api-types.ts) | **Generated** by `openapi-typescript` from `/openapi.json`. Never edited by hand. |
 | `web/app/(dashboard)/*` | Overview + Operations / Finance / Clinical / People boards + Doctor Scorecards |
 | `web/app/(entry)/*` | Role-gated forms: daily-census (Crystal), monthly-finance (Sandy/Maribel), weekly-clinical (Aneja/Reddy), weekly-hr (Andrea), admin (sites/contracts/physicians/credentials) |
 
@@ -893,7 +893,7 @@ DATABASE_URL=postgresql+asyncpg://hha:hha@localhost:5432/hha_dashboard
 DATABASE_URL_SYNC=postgresql+psycopg://hha:hha@localhost:5432/hha_dashboard
 ```
 
-**OneDrive caveat:** never run `uv sync` or `npm install` inside the OneDrive folder — use `robocopy` to `C:\dev\hha-dashboard` first. See [QUICKSTART.md](../QUICKSTART.md) step 0.
+**OneDrive caveat:** never run `uv sync` or `npm install` inside the OneDrive folder — use `robocopy` to `C:\dev\hha-dashboard` first. See [QUICKSTART.md](../../QUICKSTART.md) step 0.
 
 ---
 
@@ -983,22 +983,22 @@ Each deferred item has a session number; none are lost.
 
 | File | Component | Section |
 |---|---|---|
-| [`api/app/main.py`](../api/app/main.py) | FastAPI | §3.3 |
-| [`api/app/deps.py`](../api/app/deps.py) | Auth + DB session | §3.3, §6 |
-| [`api/app/settings.py`](../api/app/settings.py) | Pydantic Settings (env + Key Vault) | §3.6 |
-| [`api/app/models/base.py`](../api/app/models/base.py) | `Base` + `DataClass` enum | §4.5 |
-| [`api/app/models/masters.py`](../api/app/models/masters.py) | Masters schema | §4.1 |
-| [`api/alembic/versions/0001_initial.py`](../api/alembic/versions/0001_initial.py) | Initial migration + GIST exclusion | §3.4, §4.3 |
-| [`api/tests/test_schema_classification.py`](../api/tests/test_schema_classification.py) | HIPAA CI guard | §7 |
-| [`scripts/seed_sites.py`](../scripts/seed_sites.py) | Seed 11 sites | §5 |
-| [`scripts/init-schemas.sql`](../scripts/init-schemas.sql) | Local Postgres schema bootstrap | §9 |
-| [`web/middleware.ts`](../web/middleware.ts) | Route guard | §6.3 |
-| [`web/app/page.tsx`](../web/app/page.tsx) | Overview page | §5.2 |
-| [`web/next.config.ts`](../web/next.config.ts) | `/api/*` proxy in dev | §9 |
-| [`docker-compose.yml`](../docker-compose.yml) | Local dev stack | §9 |
+| [`api/app/main.py`](../../api/app/main.py) | FastAPI | §3.3 |
+| [`api/app/deps.py`](../../api/app/deps.py) | Auth + DB session | §3.3, §6 |
+| [`api/app/settings.py`](../../api/app/settings.py) | Pydantic Settings (env + Key Vault) | §3.6 |
+| [`api/app/models/base.py`](../../api/app/models/base.py) | `Base` + `DataClass` enum | §4.5 |
+| [`api/app/models/masters.py`](../../api/app/models/masters.py) | Masters schema | §4.1 |
+| [`api/alembic/versions/0001_initial.py`](../../api/alembic/versions/0001_initial.py) | Initial migration + GIST exclusion | §3.4, §4.3 |
+| [`api/tests/test_schema_classification.py`](../../api/tests/test_schema_classification.py) | HIPAA CI guard | §7 |
+| [`scripts/seed_sites.py`](../../scripts/seed_sites.py) | Seed 11 sites | §5 |
+| [`scripts/init-schemas.sql`](../../scripts/init-schemas.sql) | Local Postgres schema bootstrap | §9 |
+| [`web/middleware.ts`](../../web/middleware.ts) | Route guard | §6.3 |
+| [`web/app/page.tsx`](../../web/app/page.tsx) | Overview page | §5.2 |
+| [`web/next.config.ts`](../../web/next.config.ts) | `/api/*` proxy in dev | §9 |
+| [`docker-compose.yml`](../../docker-compose.yml) | Local dev stack | §9 |
 | [`docs/adr/001-hipaa-data-classification.md`](adr/001-hipaa-data-classification.md) | HIPAA ADR | §7 |
-| [`CLAUDE.md`](../CLAUDE.md) | Claude Code contract | (global) |
-| [`QUICKSTART.md`](../QUICKSTART.md) | Local run steps | §9 |
+| [`CLAUDE.md`](../../CLAUDE.md) | Claude Code contract | (global) |
+| [`QUICKSTART.md`](../../QUICKSTART.md) | Local run steps | §9 |
 
 ---
 

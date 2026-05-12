@@ -43,7 +43,7 @@ api/tests/test_census_portal.py::test_save_accepts_phase1_payload_without_open_s
 
 ### HIPAA classification
 
-All Phase 1 columns are **Tier A** (aggregates) per [ADR-001](adr/001-hipaa-data-classification.md). No PHI. No 18 HIPAA identifiers. The classification is enforced at the schema level by `tests/test_schema_classification.py`.
+All Phase 1 columns are **Tier A** (aggregates) per [ADR-001](../02-architecture/adr/001-hipaa-data-classification.md). No PHI. No 18 HIPAA identifiers. The classification is enforced at the schema level by `tests/test_schema_classification.py`.
 
 ---
 

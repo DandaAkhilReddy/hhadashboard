@@ -276,7 +276,7 @@ Computed scorecard rankings per physician per month. Materialized by a nightly j
 | `id` | int (PK) | A | |
 | `month` | date | A | |
 | `physician_id` | int (FK) | A | |
-| `overall_rank_score` | decimal(9,2) | A | Composite — see [boards/DOCTOR_SCORECARDS.md](boards/DOCTOR_SCORECARDS.md) for formula |
+| `overall_rank_score` | decimal(9,2) | A | Composite — see [boards/DOCTOR_SCORECARDS.md](../05-product/boards/DOCTOR_SCORECARDS.md) for formula |
 | `rvu_pct_of_peers` | decimal(5,2) | A | |
 | `revenue_per_fte_rank` | int | A | |
 
@@ -390,4 +390,4 @@ If the column genuinely needs `data_class=C`, that's a sponsor decision. Don't d
 
 ---
 
-**Next read:** [INGESTION_VENTRA.md](INGESTION_VENTRA.md) — how data gets INTO these tables.
+**Next read:** [INGESTION_VENTRA.md](../03-engineering/INGESTION_VENTRA.md) — how data gets INTO these tables.

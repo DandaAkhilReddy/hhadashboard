@@ -32,7 +32,7 @@ This is a **process-quality** dashboard, not a clinical-outcomes one. Out-of-sco
 **Source:**
 
 - Phase 1: monthly manual entry by Dr. Aneja (numerator + denominator per site per month)
-- Phase 2: Ventra's documentation timestamps (if provided — see [INGESTION_VENTRA.md](../INGESTION_VENTRA.md) § provisional fields)
+- Phase 2: Ventra's documentation timestamps (if provided — see [INGESTION_VENTRA.md](../../03-engineering/INGESTION_VENTRA.md) § provisional fields)
 
 **Display:** Per-site bar chart + state averages. Color: green ≥ 95%, yellow 85-95%, red < 85%.
 

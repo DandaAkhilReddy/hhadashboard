@@ -106,8 +106,8 @@ This will happen. Sandy will report TX collections via cash-receipts; FL via Ven
 
 ## References
 
-- [api/alembic/versions/0006_ventra_athena_source.py](../../api/alembic/versions/0006_ventra_athena_source.py)
-- [api/app/models/entries_finance.py](../../api/app/models/entries_finance.py) — `MonthlyFinanceManual`
-- [api/app/routers/entries.py](../../api/app/routers/entries.py) — `_source_for_state`
-- [jobs/ventra_ingest/parser.py](../../jobs/ventra_ingest/parser.py) — forbidden-column rejection
-- [CLAUDE.md](../../CLAUDE.md) — § "FL vs TX data sources" enforcement contract
+- [api/alembic/versions/0006_ventra_athena_source.py](../../../api/alembic/versions/0006_ventra_athena_source.py)
+- [api/app/models/entries_finance.py](../../../api/app/models/entries_finance.py) — `MonthlyFinanceManual`
+- [api/app/routers/entries.py](../../../api/app/routers/entries.py) — `_source_for_state`
+- [jobs/ventra_ingest/parser.py](../../../jobs/ventra_ingest/parser.py) — forbidden-column rejection
+- [CLAUDE.md](../../../CLAUDE.md) — § "FL vs TX data sources" enforcement contract

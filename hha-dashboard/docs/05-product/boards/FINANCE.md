@@ -145,7 +145,7 @@ Note: actual fee is per Ventra contract; 5% is the documented rate. Use this for
 | `GET /api/v1/finance/days-in-ar` | Days in AR |
 | `GET /api/v1/finance/net-collection-rate` | NCR trend |
 
-See [API_ENDPOINT_CATALOG.md](../API_ENDPOINT_CATALOG.md) § Finance.
+See [API_ENDPOINT_CATALOG.md](../../03-engineering/API_ENDPOINT_CATALOG.md) § Finance.
 
 ## Data freshness
 
@@ -153,7 +153,7 @@ See [API_ENDPOINT_CATALOG.md](../API_ENDPOINT_CATALOG.md) § Finance.
 |---|---|
 | FL collections (Phase 2) | Daily — 7 a.m. CT after Ventra delivery |
 | TX collections (Phase 1) | Monthly — when Sandy enters |
-| AR snapshot (Phase 2 FL) | Daily preferred; month-end fallback per [INGESTION_VENTRA.md](../INGESTION_VENTRA.md) |
+| AR snapshot (Phase 2 FL) | Daily preferred; month-end fallback per [INGESTION_VENTRA.md](../../03-engineering/INGESTION_VENTRA.md) |
 | AR snapshot (Phase 1 TX) | Monthly |
 
 ## RBAC

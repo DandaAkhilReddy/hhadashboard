@@ -268,7 +268,7 @@ If you suspect ongoing unauthorized access:
 2. **Audit log will show the destruction event** — preserve it forensically.
 3. **Backup integrity check:** WORM-locked Blob backups cannot be tampered with. Use those if managed PITR is compromised.
 
-ADR-004 covers RTO (4h) and RPO (≤1h with PITR; ≤24h with daily WORM): [adr/004-backup-and-disaster-recovery.md](adr/004-backup-and-disaster-recovery.md).
+ADR-004 covers RTO (4h) and RPO (≤1h with PITR; ≤24h with daily WORM): [adr/004-backup-and-disaster-recovery.md](../02-architecture/adr/004-backup-and-disaster-recovery.md).
 
 ---
 
@@ -288,7 +288,7 @@ ADR-004 covers RTO (4h) and RPO (≤1h with PITR; ≤24h with daily WORM): [adr/
 
 ### Learn
 
-1. Update [COMPLIANCE_POSTURE.md](COMPLIANCE_POSTURE.md) § BAA inventory
+1. Update [COMPLIANCE_POSTURE.md](../01-leadership/COMPLIANCE_POSTURE.md) § BAA inventory
 2. Add a recurring quarterly BAA renewal check to the calendar
 
 ---
@@ -373,4 +373,4 @@ Your job is **detect + contain**. Eradicate and recover may need help.
 
 ---
 
-**Next read:** [RUNBOOK.md](RUNBOOK.md) for operational (non-security) incident playbooks. Back to [INDEX.md](INDEX.md).
+**Next read:** [RUNBOOK.md](RUNBOOK.md) for operational (non-security) incident playbooks. Back to [INDEX.md](../README.md).

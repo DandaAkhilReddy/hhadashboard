@@ -2,7 +2,7 @@
 
 > **For engineers.** Phase 2 — how Florida RCM data from Ventra reaches the dashboard. Covers both delivery shapes (Option A pre-aggregated, Option B claim-level), the HIPAA firewall, aggregation logic, error handling, idempotency, and the Bicep + code changes needed.
 >
-> Visual: [DIAGRAMS.md § 6](DIAGRAMS.md#6-ventra-ingestion-data-flow) and [§ 7 HIPAA firewall](DIAGRAMS.md#7-hipaa-firewall-flow).
+> Visual: [DIAGRAMS.md § 6](../02-architecture/DIAGRAMS.md#6-ventra-ingestion-data-flow) and [§ 7 HIPAA firewall](../02-architecture/DIAGRAMS.md#7-hipaa-firewall-flow).
 >
 > Last updated 2026-05-11.
 
@@ -23,7 +23,7 @@ Ventra pushes daily CSVs over SFTP to an Azure Storage Account container we own.
 
 ## The two delivery shapes
 
-Ventra's spec (2026-05-08) defaults to **Option B (claim-level CSV)**. HHA has asked for **Option A (pre-aggregated CSV)** in the follow-up email (see [VENTRA_FOLLOWUP_EMAIL.md](VENTRA_FOLLOWUP_EMAIL.md)). Both are designed for; the ingestion job has two code paths.
+Ventra's spec (2026-05-08) defaults to **Option B (claim-level CSV)**. HHA has asked for **Option A (pre-aggregated CSV)** in the follow-up email (see [VENTRA_FOLLOWUP_EMAIL.md](../06-vendors/ventra/FOLLOWUP_EMAIL.md)). Both are designed for; the ingestion job has two code paths.
 
 ### Option A — pre-aggregated CSV (preferred)
 

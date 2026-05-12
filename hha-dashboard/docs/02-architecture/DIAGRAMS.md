@@ -1,6 +1,6 @@
 # Architecture diagrams
 
-> **Visual reference for the HHA Dashboard architecture.** Pair with the narrative deep-dive in [ARCHITECTURE.md](ARCHITECTURE.md). All diagrams are Mermaid (text-based, version-controlled, rendered natively on GitHub). To render in SharePoint/PDF, run [scripts/export-to-pdf.sh](scripts/export-to-pdf.sh).
+> **Visual reference for the HHA Dashboard architecture.** Pair with the narrative deep-dive in [ARCHITECTURE.md](ARCHITECTURE.md). All diagrams are Mermaid (text-based, version-controlled, rendered natively on GitHub). To render in SharePoint/PDF, run [scripts/export-to-pdf.sh](../scripts/export-to-pdf.sh).
 >
 > Last updated 2026-05-11.
 
@@ -212,7 +212,7 @@ sequenceDiagram
 - The API **re-verifies** the session token on every request — no implicit trust.
 - The `audit.upn` GUC is set per-request so audit triggers capture identity.
 
-See [ENTRA_SETUP.md](ENTRA_SETUP.md) for the one-time Entra app registration steps.
+See [ENTRA_SETUP.md](../03-engineering/ENTRA_SETUP.md) for the one-time Entra app registration steps.
 
 ---
 
@@ -253,7 +253,7 @@ sequenceDiagram
 - **Single shared credential** for all site leaders. Not per-user.
 - **`role=portal_kiosk`** restricts the session to only the census-entry endpoint — no access to dashboards.
 - **`audit.upn = 'portal-kiosk'`** in the audit log so we know it came from the portal even though we don't know which human.
-- See [PHASE_1_CENSUS_PORTAL.md](PHASE_1_CENSUS_PORTAL.md) and [adr/002-rbac-model.md](adr/002-rbac-model.md) for the threat model.
+- See [PHASE_1_CENSUS_PORTAL.md](../05-product/PHASE_1_CENSUS_PORTAL.md) and [adr/002-rbac-model.md](adr/002-rbac-model.md) for the threat model.
 
 ---
 
@@ -299,7 +299,7 @@ flowchart LR
 - **Raw files have a 30-day Blob lifecycle** then auto-delete. We never persist raw rows in Postgres.
 - **Failed parses go to a quarantine container** for investigation.
 
-Full architecture in [INGESTION_VENTRA.md](INGESTION_VENTRA.md).
+Full architecture in [INGESTION_VENTRA.md](../03-engineering/INGESTION_VENTRA.md).
 
 ---
 
@@ -353,7 +353,7 @@ flowchart TB
 - **Allowlist, not denylist.** If Ventra adds a new column we don't know about, it's automatically excluded.
 - **Aggregation collapses identity.** Even if a column slipped through, GROUP BY (date, site, payer_class) loses any per-patient resolution.
 
-Full HIPAA detail in [adr/001-hipaa-data-classification.md](adr/001-hipaa-data-classification.md) and [COMPLIANCE_POSTURE.md](COMPLIANCE_POSTURE.md).
+Full HIPAA detail in [adr/001-hipaa-data-classification.md](adr/001-hipaa-data-classification.md) and [COMPLIANCE_POSTURE.md](../01-leadership/COMPLIANCE_POSTURE.md).
 
 ---
 

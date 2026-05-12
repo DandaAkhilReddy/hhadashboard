@@ -141,8 +141,8 @@ The first question in any data-loss incident is **"is the audit log intact?"** T
 
 ## References
 
-- [jobs/pg_backup/](../../jobs/pg_backup/) — implementation
-- [jobs/pg_backup/README.md](../../jobs/pg_backup/README.md) — operator runbook
-- [scripts/restore_drill.sh](../../scripts/restore_drill.sh) — restore drill
-- [infra/modules/storage.bicep](../../infra/modules/storage.bicep) — backups container provisioning
-- [docs/RUNBOOK.md](../RUNBOOK.md) — incident procedures referencing this ADR
+- [jobs/pg_backup/](../../../jobs/pg_backup) — implementation
+- [jobs/pg_backup/README.md](../../../jobs/pg_backup/README.md) — operator runbook
+- [scripts/restore_drill.sh](../../../scripts/restore_drill.sh) — restore drill
+- [infra/modules/storage.bicep](../../../infra/modules/storage.bicep) — backups container provisioning
+- [docs/RUNBOOK.md](../../04-operations/RUNBOOK.md) — incident procedures referencing this ADR

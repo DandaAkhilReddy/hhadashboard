@@ -1,7 +1,7 @@
 # Next Build Plan — HHA Dashboard
 
 - **Date:** 2026-04-26
-- **Source inputs:** [LOCAL_VERIFICATION_REPORT.md](LOCAL_VERIFICATION_REPORT.md), [CLAUDE.md](../CLAUDE.md), the 5 ADRs in [adr/](adr/), [RUNBOOK.md](RUNBOOK.md)
+- **Source inputs:** [LOCAL_VERIFICATION_REPORT.md](LOCAL_VERIFICATION_REPORT.md), [CLAUDE.md](../../CLAUDE.md), the 5 ADRs in [adr/](../adr), [RUNBOOK.md](../04-operations/RUNBOOK.md)
 - **Status:** ranked backlog, 10 tickets, no code written yet
 - **Author:** Claude Code session, supervised by Akhil Reddy
 

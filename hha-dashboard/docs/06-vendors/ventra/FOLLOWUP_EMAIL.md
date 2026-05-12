@@ -7,9 +7,9 @@
 **Drafted:** 2026-05-11
 **Context:** Reply to Gilda's 2026-05-08 message attaching the *Standard Data Extract — Files Specifications* spec. Asks Ventra to deliver three pre-aggregated CSVs (collections, AR snapshot, per-physician monthly) instead of the claim-level extract — keeps PHI off the wire and out of HHA's database, and aligns with the ADR-001 HIPAA firewall.
 **Related docs:**
-- [VENTRA_DATA_REQUIREMENTS.md](VENTRA_DATA_REQUIREMENTS.md) — the requirements doc sent before the 2026-05-05 meeting
-- [VENTRA_QUESTIONS.md](VENTRA_QUESTIONS.md) — internal question bank
-- [VENTRA_SCRIPT_30MIN.md](VENTRA_SCRIPT_30MIN.md) — internal speaking script from the meeting
+- [VENTRA_DATA_REQUIREMENTS.md](DATA_REQUIREMENTS.md) — the requirements doc sent before the 2026-05-05 meeting
+- [VENTRA_QUESTIONS.md](QUESTIONS.md) — internal question bank
+- [VENTRA_SCRIPT_30MIN.md](MEETING_SCRIPT_30MIN.md) — internal speaking script from the meeting
 
 ---
 

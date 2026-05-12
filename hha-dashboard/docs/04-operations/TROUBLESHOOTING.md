@@ -129,7 +129,7 @@ This nukes all stopped containers, unused images, networks, and volumes. Then re
 2. If still failing: Pause OneDrive sync via system tray icon
 3. Delete `node_modules` and re-`npm install`
 
-**Prevent:** Documented in [QUICKSTART.md](../QUICKSTART.md). Consider moving the repo out of OneDrive entirely.
+**Prevent:** Documented in [QUICKSTART.md](../../QUICKSTART.md). Consider moving the repo out of OneDrive entirely.
 
 ---
 
@@ -223,7 +223,7 @@ az role assignment create --assignee $PRINCIPAL_ID \
 az webapp restart -g rg-hha-dashboard-prod -n app-hha-api-prod
 ```
 
-**Note from the deploy push (May 2026):** Currently `DATABASE_URL` and `DATABASE_URL_SYNC` on the API are set as **literal** strings (not KV references) because of an earlier debugging detour. To migrate back to KV references, follow the "Re-enable KV references" item in [ROADMAP.md](ROADMAP.md) § Phase 3.
+**Note from the deploy push (May 2026):** Currently `DATABASE_URL` and `DATABASE_URL_SYNC` on the API are set as **literal** strings (not KV references) because of an earlier debugging detour. To migrate back to KV references, follow the "Re-enable KV references" item in [ROADMAP.md](../01-leadership/ROADMAP.md) § Phase 3.
 
 ---
 

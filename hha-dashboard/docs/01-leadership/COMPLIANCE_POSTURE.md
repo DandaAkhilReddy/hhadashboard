@@ -1,6 +1,6 @@
 # HIPAA compliance posture
 
-> **For leadership, compliance reviewers, and auditors.** Plain English on what we do to protect patient health information. Engineering detail in [adr/001-hipaa-data-classification.md](adr/001-hipaa-data-classification.md). Last updated 2026-05-11.
+> **For leadership, compliance reviewers, and auditors.** Plain English on what we do to protect patient health information. Engineering detail in [adr/001-hipaa-data-classification.md](../02-architecture/adr/001-hipaa-data-classification.md). Last updated 2026-05-11.
 
 ## TL;DR
 
@@ -36,7 +36,7 @@ This is enforced in two ways:
 1. **A pre-commit hook** blocks any SQLAlchemy model that defines forbidden columns (`patient_*`, `mrn`, `claim_id`, etc.)
 2. **A CI test** (`tests/test_schema_classification.py`) fails the build if any new column has `data_class=C` without sponsor approval
 
-Engineering detail in [adr/001-hipaa-data-classification.md](adr/001-hipaa-data-classification.md).
+Engineering detail in [adr/001-hipaa-data-classification.md](../02-architecture/adr/001-hipaa-data-classification.md).
 
 ## The HIPAA firewall
 
@@ -92,7 +92,7 @@ Every mutation to a sensitive table writes a row to the `audit.audit_log` table.
 - `diff` — what changed (column-level)
 - `occurred_at` — UTC timestamp
 
-The trigger uses a PostgreSQL session-scoped GUC (`audit.upn`) so that even raw SQL changes and cron-job-driven inserts capture the actor identity. See [adr/003-audit-chain.md](adr/003-audit-chain.md) for the technical design.
+The trigger uses a PostgreSQL session-scoped GUC (`audit.upn`) so that even raw SQL changes and cron-job-driven inserts capture the actor identity. See [adr/003-audit-chain.md](../02-architecture/adr/003-audit-chain.md) for the technical design.
 
 **Properties:**
 
@@ -117,7 +117,7 @@ Customer-managed keys (CMK) for Postgres data-at-rest are deferred until HIPAA a
 | Layer | Control |
 |---|---|
 | **Identity** | Entra ID with MFA enforced via Conditional Access |
-| **Authorization** | Role-based — 7 Entra security groups (admin, exec, comp_viewer, 4 owner roles). See [adr/002-rbac-model.md](adr/002-rbac-model.md) |
+| **Authorization** | Role-based — 7 Entra security groups (admin, exec, comp_viewer, 4 owner roles). See [adr/002-rbac-model.md](../02-architecture/adr/002-rbac-model.md) |
 | **API endpoint** | Every endpoint requires authentication; sensitive endpoints check role membership |
 | **Database** | App service uses a least-privilege Postgres user (no DDL except via migrations); managed identity → Key Vault for connection string |
 | **Audit** | Every access to sensitive data writes to audit log |
@@ -132,7 +132,7 @@ If a HIPAA-relevant incident happens (suspected breach, accidental disclosure, l
 4. **Recover** — restore from known-good backup if data integrity is in question
 5. **Learn** — post-mortem within 48 hours; update runbook; notify HHA legal who handles BAA disclosure obligations
 
-Full runbook in [SECURITY_INCIDENT_PLAYBOOK.md](SECURITY_INCIDENT_PLAYBOOK.md).
+Full runbook in [SECURITY_INCIDENT_PLAYBOOK.md](../04-operations/SECURITY_INCIDENT_PLAYBOOK.md).
 
 ## What HIPAA requires us to NOT do (and we don't)
 
@@ -185,6 +185,6 @@ All artifacts are reproducible. None depend on tribal knowledge.
 
 ---
 
-**Next read for leadership:** [EXECUTIVE_OVERVIEW.md](EXECUTIVE_OVERVIEW.md) (recap) or back to [INDEX.md](INDEX.md)
-**Next read for engineering:** [adr/001-hipaa-data-classification.md](adr/001-hipaa-data-classification.md)
-**Next read for on-call:** [SECURITY_INCIDENT_PLAYBOOK.md](SECURITY_INCIDENT_PLAYBOOK.md)
+**Next read for leadership:** [EXECUTIVE_OVERVIEW.md](EXECUTIVE_OVERVIEW.md) (recap) or back to [INDEX.md](../README.md)
+**Next read for engineering:** [adr/001-hipaa-data-classification.md](../02-architecture/adr/001-hipaa-data-classification.md)
+**Next read for on-call:** [SECURITY_INCIDENT_PLAYBOOK.md](../04-operations/SECURITY_INCIDENT_PLAYBOOK.md)

@@ -145,7 +145,7 @@ Below the per-site rows, two summary rows: **FL Total** and **TX Total**.
 
 ## API endpoint
 
-`GET /api/v1/operations/summary` — returns the entire board's data in one call. Spec in [API_ENDPOINT_CATALOG.md](../API_ENDPOINT_CATALOG.md) § Operations.
+`GET /api/v1/operations/summary` — returns the entire board's data in one call. Spec in [API_ENDPOINT_CATALOG.md](../../03-engineering/API_ENDPOINT_CATALOG.md) § Operations.
 
 ## Data freshness
 
@@ -178,7 +178,7 @@ The Operations board triggers these alerts (via `alerts.alert_subscriptions`):
 - **Contract expiring 30/60/90d** — checked nightly, surfaces in digest
 - **Open shifts > 3 at any site** — daily digest
 
-Alerts route per [DATA_MODEL.md](../DATA_MODEL.md) § `alerts.alert_subscriptions`.
+Alerts route per [DATA_MODEL.md](../../02-architecture/DATA_MODEL.md) § `alerts.alert_subscriptions`.
 
 ## Phase 2+ enhancements
 

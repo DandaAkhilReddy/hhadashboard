@@ -107,7 +107,7 @@ The threat model: a misuse of the dashboard UPN gives someone access to **every 
 
 ## References
 
-- [api/app/services/entra_jwt.py](../../api/app/services/entra_jwt.py)
-- [api/app/deps.py](../../api/app/deps.py)
-- [api/app/routers/census_portal.py](../../api/app/routers/census_portal.py)
-- [docs/ENTRA_SETUP.md](../ENTRA_SETUP.md) — one-time tenant-admin steps to provision the groups
+- [api/app/services/entra_jwt.py](../../../api/app/services/entra_jwt.py)
+- [api/app/deps.py](../../../api/app/deps.py)
+- [api/app/routers/census_portal.py](../../../api/app/routers/census_portal.py)
+- [docs/ENTRA_SETUP.md](../../03-engineering/ENTRA_SETUP.md) — one-time tenant-admin steps to provision the groups

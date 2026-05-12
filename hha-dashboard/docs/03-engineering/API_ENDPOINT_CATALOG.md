@@ -84,7 +84,7 @@ Source: `api/app/routers/auth.py`
 
 ## Census portal endpoints
 
-Source: `api/app/routers/census_portal.py`. See [PHASE_1_CENSUS_PORTAL.md](PHASE_1_CENSUS_PORTAL.md).
+Source: `api/app/routers/census_portal.py`. See [PHASE_1_CENSUS_PORTAL.md](../05-product/PHASE_1_CENSUS_PORTAL.md).
 
 | Method | Path | Purpose | Auth |
 |---|---|---|---|
@@ -258,7 +258,7 @@ Source: `api/app/routers/scorecards.py`. **Exec-only.**
 | GET | `/api/v1/scorecards/physician/{npi}` | Individual scorecard detail | `exec` |
 | GET | `/api/v1/scorecards/rank` | Composite overall rank | `exec` |
 
-**Sensitivity:** Per [adr/002-rbac-model.md](adr/002-rbac-model.md), doctors **never** see their own rank or peers'. The endpoint requires `exec` group membership — not `comp_viewer`, not `admin`.
+**Sensitivity:** Per [adr/002-rbac-model.md](../02-architecture/adr/002-rbac-model.md), doctors **never** see their own rank or peers'. The endpoint requires `exec` group membership — not `comp_viewer`, not `admin`.
 
 ---
 
@@ -338,4 +338,4 @@ uv run python scripts/openapi_to_md.py > ../docs/API_ENDPOINT_CATALOG.generated.
 
 ---
 
-**Next read:** [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for what to do when one of these endpoints misbehaves.
+**Next read:** [TROUBLESHOOTING.md](../04-operations/TROUBLESHOOTING.md) for what to do when one of these endpoints misbehaves.

@@ -169,8 +169,8 @@ Each audited mutation is now 2 row writes (data + audit). Plus the GUC `set_conf
 
 ## References
 
-- [api/alembic/versions/0007_audit_triggers.py](../../api/alembic/versions/0007_audit_triggers.py) — the trigger function + per-table attachments
-- [api/app/services/audit.py](../../api/app/services/audit.py) — `current_upn` ContextVar + `set_current_upn()` helper
-- [api/app/deps.py](../../api/app/deps.py) — `after_begin` listener that copies the ContextVar into the GUC
-- [api/app/main.py](../../api/app/main.py) — middleware that sets the ContextVar from `CurrentUser`
-- [api/tests/test_audit_triggers.py](../../api/tests/test_audit_triggers.py) — integration tests
+- [api/alembic/versions/0007_audit_triggers.py](../../../api/alembic/versions/0007_audit_triggers.py) — the trigger function + per-table attachments
+- [api/app/services/audit.py](../../../api/app/services/audit.py) — `current_upn` ContextVar + `set_current_upn()` helper
+- [api/app/deps.py](../../../api/app/deps.py) — `after_begin` listener that copies the ContextVar into the GUC
+- [api/app/main.py](../../../api/app/main.py) — middleware that sets the ContextVar from `CurrentUser`
+- [api/tests/test_audit_triggers.py](../../../api/tests/test_audit_triggers.py) — integration tests

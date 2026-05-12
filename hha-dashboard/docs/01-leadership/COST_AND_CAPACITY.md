@@ -142,4 +142,4 @@ Azure is the right home because:
 ---
 
 **Next read for leadership:** [COMPLIANCE_POSTURE.md](COMPLIANCE_POSTURE.md)
-**Next read for engineering:** [ARCHITECTURE.md](ARCHITECTURE.md) § 12 (cost details)
+**Next read for engineering:** [ARCHITECTURE.md](../02-architecture/ARCHITECTURE.md) § 12 (cost details)
