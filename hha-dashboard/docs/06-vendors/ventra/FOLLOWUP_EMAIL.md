@@ -212,10 +212,20 @@ areddy@hhamedicine.com
 
 ## After sending — checklist
 
-- [ ] Sent on `__________` (fill in and commit when sent)
-- [ ] Calendar invite for follow-up session sent to: __________
-- [ ] Ventra confirmation logged in `VENTRA_QUESTIONS.md` decision tracker
-- [ ] Any field-list changes from the call land in `VENTRA_DATA_REQUIREMENTS.md` § 3 (with commit reference)
+- [x] **Sent on `2026-05-11`** (Akhil confirmed via Outlook compose screenshot)
+- [x] **Recipients as sent** (final list — replaces draft "Recipient strategy" header above):
+  - **To:** Gilda Romero, Stephanie Marx
+  - **Cc — Ventra:** Mary Kimberlin, Darshan Patel `<darshan.patel@ventrahealth.com>`
+  - **Cc — HHA:** Dinesh Reddy Kandari, Kristofer Felton, Vishnu Reddy, Sandy Collins, Joey Armas, Maribel Reyes
+  - **Notable omission:** David Reck + Suma Bhat (May 5 meeting attendees) NOT included. Add to nudge thread if no reply by 2026-05-19.
+- [x] **Calendar invite window offered:** this week May 13-15 (Akhil's choice — tighter than the suggested May 18/25 window)
+- [ ] Calendar invite for follow-up session sent to: __________ (pending Ventra's reply confirming a slot)
+- [ ] Ventra confirmation of pre-aggregated shape logged in `VENTRA_QUESTIONS.md` decision tracker
+- [ ] Net-revenue formula written confirmation logged in `DATA_REQUIREMENTS.md` § 3.1
+- [ ] Delivery channel choice (SFTP vs Snowflake-direct) captured in `DATA_REQUIREMENTS.md`
+- [ ] Any field-list changes from the working session land in `DATA_REQUIREMENTS.md` § 3 (with commit reference)
+
+**Next nudge date:** 2026-05-19 (Monday) — if Ventra hasn't replied by EOD this date, send a polite follow-up adding David Reck + Suma Bhat to the thread.
 
 ## Anticipated responses + how to handle
 
