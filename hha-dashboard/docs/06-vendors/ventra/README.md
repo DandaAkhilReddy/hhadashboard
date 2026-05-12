@@ -11,10 +11,18 @@ Ventra is HHA's RCM (Revenue Cycle Management) partner. They process billing for
 
 ## Contents
 
+### HHA-authored docs
+
 - [DATA_REQUIREMENTS.md](DATA_REQUIREMENTS.md) — **The doc we send Ventra.** What HHA needs, in their language. Sent 2026-05-04 pre-meeting.
 - [QUESTIONS.md](QUESTIONS.md) — Internal question bank organized by meeting block (BAA, scope, delivery shape, fields, ops). 60+ questions with anticipated answers.
 - [MEETING_SCRIPT_30MIN.md](MEETING_SCRIPT_30MIN.md) — Literal speaking script for vendor calls: SAY / LISTEN FOR / IF-THEN / WRITE DOWN format. 5-page printable.
 - [FOLLOWUP_EMAIL.md](FOLLOWUP_EMAIL.md) — Draft email asking Ventra to deliver pre-aggregated CSVs (Option A) instead of their claim-level Standard Data Extract.
+
+### Vendor-provided artifacts (authoritative source from Ventra)
+
+- [standard-data-extract-files-specifications.xlsx](standard-data-extract-files-specifications.xlsx) — Ventra's official spec for the Standard Data Extract. Attached to Gilda Romero's 2026-05-08 email. 11 sheets covering Invoice, ChargeLines, TransactionsAlt, Physician, Facility, DownCodes, HeldCharts, ChartEntry, Guarantor, Carrier, plus a File Joins sheet. **This is the canonical source for Ventra's data shape** — when in doubt about a column or join, open this file first.
+
+> ⚠ The Invoice and Guarantor sheets list patient identifier columns (PatFName, MRN, SSN, etc.) that Ventra's default extract carries. HHA's [HIPAA firewall](../../03-engineering/INGESTION_VENTRA.md#the-hipaa-firewall-option-b-code-path) strips these at parse time before any database write. The xlsx itself contains schema metadata only — no actual patient data.
 
 ## People
 
