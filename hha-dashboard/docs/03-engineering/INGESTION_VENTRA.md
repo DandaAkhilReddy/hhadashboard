@@ -1,14 +1,22 @@
 # Ventra ingestion architecture
 
-> **For engineers.** Phase 2 — how Florida RCM data from Ventra reaches the dashboard. Covers both delivery shapes (Option A pre-aggregated, Option B claim-level), the HIPAA firewall, aggregation logic, error handling, idempotency, and the Bicep + code changes needed.
+> **For engineers.** Phase 2 — how Florida RCM data from Ventra reaches the dashboard. The delivery shape is **pre-aggregated CSVs** per [ADR-006](../02-architecture/adr/006-ventra-pre-aggregated-feed.md); the row-level Standard Data Extract path is retained as a fallback in case Ventra refuses pre-aggregated.
 >
 > Visual: [DIAGRAMS.md § 6](../02-architecture/DIAGRAMS.md#6-ventra-ingestion-data-flow) and [§ 7 HIPAA firewall](../02-architecture/DIAGRAMS.md#7-hipaa-firewall-flow).
 >
 > Last updated 2026-05-11.
 
+## Decision status
+
+[ADR-006](../02-architecture/adr/006-ventra-pre-aggregated-feed.md) is **Proposed** — Akhil sent the pre-aggregated proposal to Ventra on 2026-05-11 (see [FOLLOWUP_EMAIL.md](../06-vendors/ventra/FOLLOWUP_EMAIL.md)). Until Ventra confirms in writing:
+
+- Build proceeds on Option A (pre-aggregated). It's the contract HHA is offering.
+- Bicep `enable_sftp` flag stays **off** in prod. No SSH key gets installed. No Ventra user account is provisioned.
+- Option B (row-level Standard Data Extract) stays documented as the contingency, not built.
+
 ## TL;DR
 
-Ventra pushes daily CSVs over SFTP to an Azure Storage Account container we own. A `_MANIFEST.csv` file written last triggers an Event Grid event → Container Apps Job. The job parses the CSVs, **strips PHI at the row level**, aggregates in memory, and UPSERTs aggregates to Postgres `facts.*` tables. Raw files are deleted after 30 days via Blob lifecycle. **No PHI ever lands in Postgres.**
+Ventra writes three pre-aggregated CSVs daily (`collections.csv`, `ar_snapshot.csv`, optionally `physician_monthly.csv` at month close) into a `/YYYY-MM-DD/` folder on HHA's SFTP-enabled Azure Storage Account, then writes `_MANIFEST.csv` last. The manifest write fires an Event Grid event → Storage Queue → KEDA-triggered Container Apps Job. The job validates the manifest (V1-V4), validates each file's schema and content (V5-V11), enforces cross-file invariants including FL-only (V12-V13), then UPSERTs into `entries.fact_collections_daily`, `entries.fact_ar_snapshot`, and `entries.fact_revenue_by_physician_mo`. All rows carry `source_system = 'VENTRA_FL_ATHENA'` enforced by DB CHECK. **No PHI ever touches HHA systems** because none ever leaves Ventra.
 
 ## Why this design
 
@@ -23,27 +31,52 @@ Ventra pushes daily CSVs over SFTP to an Azure Storage Account container we own.
 
 ## The two delivery shapes
 
-Ventra's spec (2026-05-08) defaults to **Option B (claim-level CSV)**. HHA has asked for **Option A (pre-aggregated CSV)** in the follow-up email (see [VENTRA_FOLLOWUP_EMAIL.md](../06-vendors/ventra/FOLLOWUP_EMAIL.md)). Both are designed for; the ingestion job has two code paths.
+Ventra's spec (2026-05-08) defaults to **Option B (claim-level CSV)**. HHA proposed **Option A (pre-aggregated CSV)** in the follow-up email of 2026-05-11. The architectural decision in [ADR-006](../02-architecture/adr/006-ventra-pre-aggregated-feed.md) locks Option A as the target shape; Option B is retained as a contingency to be activated only if Ventra refuses in writing.
 
-### Option A — pre-aggregated CSV (preferred)
+### Option A — pre-aggregated CSV (the decision, per ADR-006)
 
-Ventra delivers three files daily that match our fact-table grain exactly:
+Ventra delivers three files daily that match HHA's fact-table grain exactly:
 
-- `collections_YYYY-MM-DD.csv` — already grouped by (date, facility, payer_class)
-- `ar_snapshot_YYYY-MM-DD.csv` — already grouped by (snapshot_date, facility, aging_bucket)
-- `physician_monthly_YYYY-MM.csv` — already grouped by (month, physician_npi) (written monthly, not daily)
+- `collections.csv` (or `collections_YYYY-MM-DD.csv`) — grouped by `(date, facility_no, payer_class)`
+- `ar_snapshot.csv` — grouped by `(snapshot_date, facility_no, aging_bucket)`
+- `physician_monthly.csv` — grouped by `(month, physician_npi, facility_no)` — written monthly only
 
-**Our job:** column validation, FL filter (defense-in-depth), source_system tag, UPSERT.
+**HHA's job:** auto-validate (V1-V14, see catalog below), upsert into three fact tables, alert on quarantine. No PHI is in the file shape so no firewall is needed in the parser; ADR-001's CI guard at migration time provides defense-in-depth.
+
 **Effort:** ~2 weeks solo engineer.
 
-### Option B — claim-level CSV (fallback)
+### Option B — claim-level CSV (fallback only)
 
-Ventra's `Standard Data Extract` — 10 CSVs per day with claim-level rows and patient PHI in the Invoice and Guarantor files.
+Ventra's `Standard Data Extract` — multiple CSVs per delivery with claim-level rows and patient identifiers in the Invoice and Guarantor files.
 
-**Our job:** parse all 10 files, **strip PHI at parse time** (allowlist approach), aggregate in memory at the grain we need, UPSERT.
-**Effort:** ~4 weeks solo engineer.
+**HHA's job:** parse all files, **strip PHI at parse time** (allowlist approach per the firewall section below), aggregate in memory at the grain HHA needs, upsert. The strip + aggregate stage runs *before* the V1-V14 validator catalog so the validators see only Tier-A rows.
 
-The rest of this document covers both. Code branches on the delivery shape.
+**Effort:** ~5 weeks solo engineer (the extra ~3 weeks is entirely PHI-safety hardening at every boundary — see ADR-006 for the breakdown).
+
+This document covers both. The Option B sections (HIPAA firewall, aggregation logic) are only executed if Ventra refuses the proposal.
+
+## Auto-check validators (V1-V14)
+
+Every drop runs through these checks in order. Any failure quarantines the drop and emails ops. V12 (FL-only) and V14 (source_system) are the two HHA cannot ever loosen — they are HIPAA/scope invariants per ADR-001 and ADR-005.
+
+| # | Rule | Failure |
+|---|---|---|
+| V1 | `_MANIFEST.csv` parses; has columns `file_name, sha256, row_count` | quarantine |
+| V2 | Every file referenced in manifest exists in `vendor-inbound/ventra/YYYY-MM-DD/` | quarantine |
+| V3 | SHA-256 of each blob matches manifest checksum | quarantine |
+| V4 | Row count of each file matches manifest | quarantine |
+| V5 | Schema match — required columns present with correct Pydantic type | quarantine |
+| V6 | `date` column in collections + ar_snapshot equals folder `drop_date` (drift detect) | quarantine |
+| V7 | `month` in physician_monthly is first-of-month date | quarantine |
+| V8 | Every `facility_no` exists in `masters.facilities` | quarantine + ops alert ("vendor sent unknown facility — config drift") |
+| V9 | AR buckets sum to total within ±$1 rounding tolerance; `credit` bucket allowed negative, all others non-negative | quarantine |
+| V10 | Collections sanity — `gross_charges + write_offs >= payments_received`; `payments_received >= 0` | quarantine |
+| V11 | NPI is 10-digit numeric; `encounters_count >= 0`; `total_rvu >= 0` | quarantine |
+| V12 | **FL-only invariant (ADR-005)** — every `facility_no` in HHA's Florida facility set; any other → quarantine + **INCIDENT** alert | quarantine + incident |
+| V13 | Dedup — for each `(file_name, sha256)`: if same sha already in `processed_files` → log `dedup_skip` and skip entirely; if same `(drop_date, file_name)` but different sha → quarantine ("re-send with changed content; manual review required") | mixed |
+| V14 | `source_system='VENTRA_FL_ATHENA'` (enforced by DB DEFAULT + CHECK on fact tables) | DB-level (cannot violate) |
+
+Implementation lives in `jobs/ventra_ingest/validators.py` with one fixture per rule under `tests/fixtures/bad_drops/`.
 
 ## Azure resource architecture
 
