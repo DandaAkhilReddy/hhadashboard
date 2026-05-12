@@ -59,6 +59,12 @@ param vendor_storage_sku = 'Standard_LRS'
 param vendor_storage_lifecycle_delete_days = 90
 param enable_sftp = false
 param ventra_sftp_public_key = ''
+// Event Grid: System Topic on vendor-storage + manifest-filtered
+// subscription → q-ventra-manifests queue. Stays off until
+// enable_vendor_storage is flipped on (the topic source is the vendor
+// account). Two-stage rollout = land storage first, validate manually,
+// then wire the EG path.
+param enable_vendor_eventgrid = false
 
 // Monitor — off in dev to save Log Analytics ingestion costs (~$2.30/GB).
 param enable_monitor = false

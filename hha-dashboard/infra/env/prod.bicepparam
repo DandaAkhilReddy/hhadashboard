@@ -79,6 +79,12 @@ param vendor_storage_sku = 'Standard_ZRS'
 param vendor_storage_lifecycle_delete_days = 90
 param enable_sftp = false
 param ventra_sftp_public_key = ''
+// Event Grid wiring stays off in prod until enable_vendor_storage has
+// been flipped on AND a sample drop has been validated end-to-end in dev.
+// Two-stage rollout prevents a misconfigured subscription from dead-
+// lettering legitimate vendor drops to vendor-deadletter before anyone
+// notices.
+param enable_vendor_eventgrid = false
 
 // Monitor — ON in prod. Required for HIPAA audit chain.
 param enable_monitor = true

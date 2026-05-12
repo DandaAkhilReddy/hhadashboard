@@ -139,6 +139,9 @@ param enable_sftp bool = false
 @description('Ventra SFTP public SSH key (full OpenSSH-format public key content). Only consumed when enable_sftp is true. Rotated quarterly via Key Vault.')
 param ventra_sftp_public_key string = ''
 
+@description('Enable Event Grid system topic + manifest subscription + Storage Queue on the vendor-storage account. Requires enable_vendor_storage = true. When this is false the vendor-storage account still exists but blob events are silently dropped.')
+param enable_vendor_eventgrid bool = false
+
 @description('Enable Azure Communication Services (Email) for the daily 7am exec digest + credential expiry alerts. Uses an Azure Managed Domain in v0 (sender DoNotReply@<random>.azurecomm.net); custom domain attachment is a follow-up.')
 param enable_email bool = false
 
@@ -283,6 +286,27 @@ module vendorStorage './modules/vendor_storage.bicep' = if (enable_vendor_storag
     pe_subnet_id: enable_vnet ? vnet!.outputs.pe_subnet_id : ''
     tags: tags
   }
+}
+
+// Vendor Event Grid — System Topic on vendor-storage + manifest-filtered
+// subscription → q-ventra-manifests Storage Queue. Requires
+// enable_vendor_storage = true (the topic source is the vendor account).
+// When this is false the storage account still exists but blob events are
+// silently dropped (operator can only see blob arrivals via manual scan).
+//
+// Gated separately from enable_vendor_storage so we can stand up the
+// storage account first (e.g. to seed a sample drop manually) and wire
+// the EG path in a follow-up deploy once the queue + topic are validated.
+module vendorEventGrid './modules/vendor_eventgrid.bicep' = if (enable_vendor_storage && enable_vendor_eventgrid) {
+  name: 'vendor-eventgrid-deploy'
+  params: {
+    vendor_storage_account_name: vendor_storage_account_name
+    location: location
+    tags: tags
+  }
+  dependsOn: [
+    vendorStorage
+  ]
 }
 
 // Log Analytics workspace + Application Insights — observability foundation.
