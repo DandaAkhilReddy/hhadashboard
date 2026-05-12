@@ -60,39 +60,69 @@ PANDOC_OPTS=(
   --toc-depth=2
 )
 
-# Files to convert (relative to docs/)
+# Files to convert (relative to docs/).
+# Organized by the same tier structure as the folders so the PDF output mirrors the markdown layout.
 FILES=(
-  INDEX.md
-  EXECUTIVE_OVERVIEW.md
-  ROADMAP.md
-  COST_AND_CAPACITY.md
-  COMPLIANCE_POSTURE.md
-  DIAGRAMS.md
-  ARCHITECTURE.md
-  DATA_MODEL.md
-  INGESTION_VENTRA.md
-  API_ENDPOINT_CATALOG.md
-  TROUBLESHOOTING.md
-  SECURITY_INCIDENT_PLAYBOOK.md
-  RUNBOOK.md
-  ONBOARDING.md
-  ENTRA_SETUP.md
-  PHASE_1_CENSUS_PORTAL.md
-  GLOSSARY.md
-  VENTRA_DATA_REQUIREMENTS.md
-  VENTRA_QUESTIONS.md
-  VENTRA_SCRIPT_30MIN.md
-  VENTRA_FOLLOWUP_EMAIL.md
-  boards/OPERATIONS.md
-  boards/FINANCE.md
-  boards/CLINICAL.md
-  boards/PEOPLE.md
-  boards/DOCTOR_SCORECARDS.md
-  adr/001-hipaa-data-classification.md
-  adr/002-rbac-model.md
-  adr/003-audit-chain.md
-  adr/004-backup-and-disaster-recovery.md
-  adr/005-fl-tx-scope-split.md
+  README.md
+
+  # 01 — Leadership
+  01-leadership/README.md
+  01-leadership/EXECUTIVE_OVERVIEW.md
+  01-leadership/ROADMAP.md
+  01-leadership/COST_AND_CAPACITY.md
+  01-leadership/COMPLIANCE_POSTURE.md
+
+  # 02 — Architecture
+  02-architecture/README.md
+  02-architecture/ARCHITECTURE.md
+  02-architecture/DIAGRAMS.md
+  02-architecture/DATA_MODEL.md
+  02-architecture/adr/README.md
+  02-architecture/adr/001-hipaa-data-classification.md
+  02-architecture/adr/002-rbac-model.md
+  02-architecture/adr/003-audit-chain.md
+  02-architecture/adr/004-backup-and-disaster-recovery.md
+  02-architecture/adr/005-fl-tx-scope-split.md
+
+  # 03 — Engineering
+  03-engineering/README.md
+  03-engineering/ONBOARDING.md
+  03-engineering/ENTRA_SETUP.md
+  03-engineering/API_ENDPOINT_CATALOG.md
+  03-engineering/INGESTION_VENTRA.md
+
+  # 04 — Operations
+  04-operations/README.md
+  04-operations/RUNBOOK.md
+  04-operations/TROUBLESHOOTING.md
+  04-operations/SECURITY_INCIDENT_PLAYBOOK.md
+
+  # 05 — Product
+  05-product/README.md
+  05-product/PHASE_1_CENSUS_PORTAL.md
+  05-product/boards/README.md
+  05-product/boards/OPERATIONS.md
+  05-product/boards/FINANCE.md
+  05-product/boards/CLINICAL.md
+  05-product/boards/PEOPLE.md
+  05-product/boards/DOCTOR_SCORECARDS.md
+
+  # 06 — Vendors
+  06-vendors/README.md
+  06-vendors/ventra/README.md
+  06-vendors/ventra/DATA_REQUIREMENTS.md
+  06-vendors/ventra/QUESTIONS.md
+  06-vendors/ventra/MEETING_SCRIPT_30MIN.md
+  06-vendors/ventra/FOLLOWUP_EMAIL.md
+
+  # 07 — Reference
+  07-reference/README.md
+  07-reference/GLOSSARY.md
+
+  # 99 — Archive (optional — uncomment if you want historical docs in the PDF export)
+  # 99-archive/README.md
+  # 99-archive/PROJECT_STATE_AUDIT.md
+  # 99-archive/LOCAL_VERIFICATION_REPORT.md
 )
 
 # Counters

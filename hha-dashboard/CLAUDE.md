@@ -2,13 +2,13 @@
 
 > Every Claude Code session reads this file first. It is the contract. If it conflicts with anything else, this wins.
 >
-> **For the doc map:** see [docs/INDEX.md](docs/INDEX.md) — entry point to all 17 handoff docs (executive overview, diagrams, board specs, glossary, etc.)
+> **For the doc map:** see [docs/README.md](docs/README.md) — entry point to the full handoff documentation set, organized into 7 tiers (01-leadership through 07-reference + 99-archive).
 
 ## What this project is
 
 HHA Medicine Operations Dashboard — an Azure-only, HIPAA-first analytics platform for HHA exec leadership. Single Next.js + FastAPI + PostgreSQL stack. Solo build with Claude Code.
 
-Build plan lives in [DASHBOARD_PLAN.md](../DASHBOARD_PLAN.md) (root of the OneDrive project folder). System architecture in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). ADRs live in [docs/adr/](docs/adr/). Operational procedures in [docs/RUNBOOK.md](docs/RUNBOOK.md). Day-1 setup checklist in [docs/ONBOARDING.md](docs/ONBOARDING.md). Read all five before any significant work.
+Build plan lives in [DASHBOARD_PLAN.md](../DASHBOARD_PLAN.md) (root of the OneDrive project folder). System architecture in [docs/02-architecture/ARCHITECTURE.md](docs/02-architecture/ARCHITECTURE.md). ADRs live in [docs/02-architecture/adr/](docs/02-architecture/adr/). Operational procedures in [docs/04-operations/RUNBOOK.md](docs/04-operations/RUNBOOK.md). Day-1 setup checklist in [docs/03-engineering/ONBOARDING.md](docs/03-engineering/ONBOARDING.md). Read all five before any significant work.
 
 **Authoritative ADRs (in priority order):**
 
