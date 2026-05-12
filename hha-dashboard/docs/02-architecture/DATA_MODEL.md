@@ -169,64 +169,77 @@ Manual entry of open positions, used by People & Pipeline board.
 
 Aggregate facts. Sources: Ventra (Phase 2), Paycom (Phase 4), and computed from `entries.*`.
 
-### `facts.collections_daily`
+### `entries.fact_collections_daily` *(Ventra pre-aggregated, ADR-006)*
 
-Daily collections from Ventra (FL) or rolled-up from `entries.monthly_finance_manual` (TX).
+Daily collections from Ventra (FL only). Live as of migration 0011. **Lives in `entries` schema, not `facts`** — the original plan was a separate `facts` schema but the build landed everything under `entries.*` to keep the audit-trigger configuration scope flat. Same Tier-A classification either way.
 
 | Column | Type | Class | Description |
 |---|---|---|---|
-| `id` | int (PK) | A | |
-| `site_id` | int (FK) | A | |
-| `posting_date` | date | A | Payment posting date (Central time) |
-| `payer_class` | varchar(20) | A | `commercial`, `medicare`, `medicaid`, `selfpay`, `other` |
-| `source_system` | varchar(30) | A | `VENTRA_FL_ATHENA` or `HHA_TX_MANUAL` |
-| `gross_charges` | decimal(18,2) | A | |
-| `payments_received` | decimal(18,2) | A | |
-| `contractual_adjustments` | decimal(18,2) | A | |
-| `write_offs` | decimal(18,2) | A | |
-| `payer_refunds` | decimal(18,2) | A | |
-| `patient_refunds` | decimal(18,2) | A | |
-| `net_revenue` | decimal(18,2) | A | Pre-computed by Ventra (preferred) or derived |
+| `id` | int (PK) | A | Surrogate; natural unique below |
+| `date` | date | A | Payment posting date (Central time) |
+| `facility_no` | int | A | Joins to `masters.sites.id` (v1; future: `masters.sites.ventra_facility_no` if Ventra insists on their IDs) |
+| `payer_class` | varchar(20) | A | CHECK in (`commercial`, `medicare`, `medicaid`, `selfpay`, `other`) |
+| `gross_charges` | numeric(18,2) | A | CHECK >= 0 |
+| `payments_received` | numeric(18,2) | A | CHECK >= 0 |
+| `contractual_adjustments` | numeric(18,2) | A | default 0 |
+| `write_offs` | numeric(18,2) | A | default 0 |
+| `payer_refunds` | numeric(18,2) | A | default 0 |
+| `patient_refunds` | numeric(18,2) | A | default 0 |
+| `net_revenue` | numeric(18,2) | A | Ventra-computed (see net-revenue formula doc) |
+| `source_system` | varchar(30) | A | DB CHECK locked to `'VENTRA_FL_ATHENA'` |
+| `state` | char(2) | A | DB CHECK locked to `'FL'` |
+| `ingest_run_id` | uuid | A | FK-equivalent to `ops.ingest_run.run_id` (no DB FK — app-enforced) |
 | `created_at` | timestamptz | A | |
+| `updated_at` | timestamptz | A | UPSERT bumps |
 
-**Uniqueness:** `(site_id, posting_date, payer_class, source_system)` — UPSERT key.
-**RBAC:** read access requires `exec` or `comp_viewer` role.
+**Uniqueness (UPSERT key):** `(date, facility_no, payer_class)` — `uq_collections_daily_natural`.
+**Indexes:** `date`, `facility_no`, `ingest_run_id`.
+**Audit trigger:** `audit_fact_collections_daily_change` (migration 0011 + `app.services.audit.AUDITED_TABLES`).
+**RBAC:** read access via `GET /api/v1/finance/daily-collections`, gated to `owner_finance` / `admin` / `exec`.
 
-### `facts.ar_snapshot`
+### `entries.fact_ar_snapshot` *(Ventra pre-aggregated, ADR-006)*
 
 AR aging snapshot. Daily snapshots preferred; month-end acceptable for v1.
 
 | Column | Type | Class | Description |
 |---|---|---|---|
 | `id` | int (PK) | A | |
-| `site_id` | int (FK) | A | |
 | `snapshot_date` | date | A | End-of-business Central time |
-| `aging_bucket` | varchar(20) | A | `0-30`, `31-60`, `61-90`, `91-120`, `120+`, `credit` |
-| `outstanding_amount` | decimal(18,2) | A | Negative values only in `credit` bucket |
-| `source_system` | varchar(30) | A | |
+| `facility_no` | int | A | |
+| `aging_bucket` | varchar(10) | A | CHECK in (`0-30`, `31-60`, `61-90`, `91-120`, `120+`, `credit`) |
+| `outstanding_amount` | numeric(18,2) | A | CHECK >= 0 unless `aging_bucket = 'credit'` |
+| `source_system` | varchar(30) | A | DB CHECK locked to `'VENTRA_FL_ATHENA'` |
+| `state` | char(2) | A | DB CHECK locked to `'FL'` |
+| `ingest_run_id` | uuid | A | |
+| `created_at`, `updated_at` | timestamptz | A | |
 
-**Uniqueness:** `(site_id, snapshot_date, aging_bucket, source_system)`.
+**Uniqueness (UPSERT key):** `(snapshot_date, facility_no, aging_bucket)`.
+**RBAC:** read access via `GET /api/v1/finance/ar-snapshot`, gated to `owner_finance` / `admin` / `exec`.
 
-### `facts.revenue_by_physician_mo`
+### `entries.fact_revenue_by_physician_mo` *(Ventra pre-aggregated, ADR-006)*
 
 Per-physician monthly metrics. Drives Doctor Scorecards.
 
 | Column | Type | Class | Description |
 |---|---|---|---|
 | `id` | int (PK) | A | |
-| `month` | date | A | First-of-month |
-| `physician_npi` | varchar(10) | A (FK to masters.physicians.npi) | |
+| `month` | date | A | First-of-month; CHECK `month = date_trunc('month', month)::date` |
+| `physician_npi` | varchar(10) | A | CHECK `~ '^[0-9]{10}$'` |
 | `facility_no` | int | A | Primary attribution facility for the month |
-| `encounters_count` | int | A | Distinct encounters this month |
-| `total_rvu` | decimal(9,2) | A | |
-| `total_work_rvu` | decimal(9,2) | A | |
-| `revenue_attributed` | decimal(18,2) | A | |
-| `chart_turnaround_median_hours` | decimal(9,2) | A | Provisional — only if Ventra captures |
-| `pct_notes_signed_within_24h` | decimal(5,2) | A | Provisional |
-| `source_system` | varchar(30) | A | |
+| `encounters_count` | int | A | CHECK >= 0 |
+| `total_rvu` | numeric(9,2) | A | CHECK >= 0, default 0 |
+| `total_work_rvu` | numeric(9,2) | A | CHECK >= 0, default 0 |
+| `revenue_attributed` | numeric(18,2) | A | |
+| `source_system` | varchar(30) | A | DB CHECK locked to `'VENTRA_FL_ATHENA'` |
+| `state` | char(2) | A | DB CHECK locked to `'FL'` |
+| `ingest_run_id` | uuid | A | |
+| `created_at`, `updated_at` | timestamptz | A | |
 
-**Uniqueness:** `(month, physician_npi, source_system)`.
-**RBAC:** read access requires `exec` only (no `comp_viewer` — scorecards are exec-only, per ADR-002).
+**Uniqueness (UPSERT key):** `(month, physician_npi, facility_no)`.
+**Indexes:** `month`, `physician_npi`, `ingest_run_id`.
+**RBAC:** read access via `GET /api/v1/finance/physician-monthly`, gated to `owner_finance` / `admin` / `exec` (NOT `comp_viewer` — revenue is non-comp).
+
+**Chart-turnaround columns deferred:** the earlier plan included `chart_turnaround_median_hours` + `pct_notes_signed_within_24h`. ADR-006 narrowed the v1 spec to revenue + RVU + encounter count only; chart-turnaround signals stay in `entries.weekly_clinical` (manually entered) for now.
 
 ### `facts.headcount_daily`
 
@@ -305,6 +318,52 @@ Computed scorecard rankings per physician per month. Materialized by a nightly j
 **Backup:** included in nightly `pg_dump` → Blob WORM.
 
 ADR-003 covers the design rationale: [adr/003-audit-chain.md](adr/003-audit-chain.md).
+
+---
+
+## `ops` schema *(Phase 1B — ingest telemetry)*
+
+Operational state for the Ventra ingest pipeline (and any future vendor pipelines that adopt the same shape). Created in migration 0012. **NOT in `AUDITED_TABLES`** — auditing the auditor adds noise without value.
+
+### `ops.ingest_run`
+
+One row per Container Apps Job replica execution. INSERTed by `IngestRun.start()` (status `running`); UPDATEd by `IngestRun.complete()` to a terminal status. Operators query this for "did Ventra deliver today?" and post-incident forensics.
+
+| Column | Type | Class | Description |
+|---|---|---|---|
+| `run_id` | uuid (PK) | A | `gen_random_uuid()` default |
+| `vendor` | text | A | `'ventra'` (extensible for future vendors) |
+| `drop_date` | date | A | YYYY-MM-DD folder under `vendor-inbound/` |
+| `manifest_path` | text | A | Full blob path of the manifest that triggered this run |
+| `status` | text | A | CHECK in (`queued`, `running`, `succeeded`, `failed`, `quarantined`) |
+| `started_at` | timestamptz | A | `now()` default |
+| `completed_at` | timestamptz | A | nullable until terminal state |
+| `files_count` | int | A | nullable; CHECK >= 0 |
+| `rows_in` | int | A | total rows seen across all data files; CHECK >= 0 |
+| `rows_out` | int | A | total rows written to fact tables; CHECK >= 0 |
+| `error_message` | text | A | populated on `failed` / `quarantined` |
+| `error_details` | jsonb | A | structured rule + line_no + facility_no etc. |
+| `correlation_id` | uuid | A | App Insights cross-system trace key |
+
+**Indexes:** `(status, started_at DESC)` for queue-style queries, `(vendor, drop_date)` for drop-history queries, `correlation_id` for cross-system tracing.
+
+### `ops.processed_files`
+
+Dedup ledger for V13 (vendor re-delivery detection). One row per data file successfully ingested. Composite PK + UNIQUE on `(vendor, sha256)` so the same file content can't be processed twice across different drops.
+
+| Column | Type | Class | Description |
+|---|---|---|---|
+| `vendor` | text | A | PK part 1 |
+| `drop_date` | date | A | PK part 2 |
+| `file_name` | text | A | PK part 3 |
+| `blob_path` | text | A | full path under vendor-inbound for replay |
+| `sha256` | char(64) | A | CHECK `~ '^[0-9a-f]{64}$'` |
+| `row_count` | int | A | CHECK >= 0 |
+| `processed_at` | timestamptz | A | `now()` default |
+| `run_id` | uuid (FK → ops.ingest_run.run_id) | A | RESTRICT — never cascade-delete runs |
+
+**Uniqueness:** PK `(vendor, drop_date, file_name)` + secondary UNIQUE `(vendor, sha256)`.
+**V13 contract:** orchestrator queries `WHERE vendor='ventra' AND drop_date=:dd` to classify each manifest entry as fresh / already_processed / conflict.
 
 ---
 
