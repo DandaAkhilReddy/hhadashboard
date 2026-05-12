@@ -468,6 +468,211 @@ WHERE changed_by_upn = '__system__'
 
 **Action:** check App Insights traces for that timestamp. If unexplained, rotate KV secrets and admin Postgres password, post-mortem.
 
+### D.8 "Ventra drop quarantined" *(email subject starts with [ACTION REQUIRED])*
+
+**Trigger:** ACS email from `pulse-noreply@hhamedicine.com` saying a Ventra drop failed validation. The drop date, rule (V1-V13), and a one-line reason are in the body.
+
+**What happened:** The Container Apps Job ran V1-V14 against Ventra's drop and one rule rejected it. Original files persist in `vendor-inbound/ventra/<drop_date>/`; a copy + sidecar landed in `vendor-quarantine/ventra/<drop_date>/`. No fact-table rows were written.
+
+**Triage steps:**
+
+1. **Read the reject sidecar:**
+
+   ```bash
+   az storage blob download \
+     --account-name <vendor_storage_account> \
+     --container-name vendor-quarantine \
+     --name "ventra/<drop_date>/_REJECT_REASON.txt" \
+     --file /tmp/reason.txt --auth-mode login
+   cat /tmp/reason.txt
+   ```
+
+   The sidecar's `RULE`, `MESSAGE`, and `DETAILS` block tell you exactly which validator fired and on which file + line.
+
+2. **Confirm the run row:**
+
+   ```sql
+   SELECT run_id, status, error_message, error_details, started_at, completed_at
+   FROM ops.ingest_run
+   WHERE vendor = 'ventra' AND drop_date = '<drop_date>'
+   ORDER BY started_at DESC LIMIT 1;
+   ```
+
+   `status` should be `quarantined`. If `failed`, this is an unhandled exception path — see D.9.
+
+3. **Classify the failure** using the per-rule catalog in [TROUBLESHOOTING.md](TROUBLESHOOTING.md#ventra-ingest-validation-failures-v1v14).
+
+4. **Email Ventra** (Gilda + Stephanie + cc CC list from `06-vendors/ventra/README.md`) with the rule + sidecar excerpt. Ask for a corrected file.
+
+5. **Replay after fix:** when Ventra delivers a corrected file, upload to a fresh retry folder:
+
+   ```bash
+   ./scripts/seed_sample_ventra_drop.sh <vendor_storage_account> <drop_date>-retry-1 vendor-inbound
+   ```
+
+   Note the `-retry-1` suffix — the original `vendor-inbound/ventra/<drop_date>/` files persist for 90 days but should NOT be modified. The retry folder triggers a fresh Event Grid event and a fresh `ops.ingest_run`.
+
+   If V13 ("dedup conflict — same file_name, different sha") was the rule that fired, the replay still requires manual sign-off: the operator must confirm with Ventra that the original was a known-bad delivery before re-running.
+
+**Do not delete** the quarantine sidecar or the inbound files. The 90-day lifecycle policy reaps them.
+
+### D.9 "Ventra ingest failed" *(email subject starts with [URGENT])*
+
+**Trigger:** ACS email saying `ventra.ingest_failed` — distinct from quarantine. The job hit an unhandled exception (DB outage, code bug, blob-permissions issue, etc.).
+
+**Triage:**
+
+1. **App Insights** — search by the `correlation_id` from the email body:
+
+   ```kql
+   traces
+   | where customDimensions.correlation_id == "<paste from email>"
+   | order by timestamp asc
+   ```
+
+   The full stack trace + structured context for every step up to the failure is here.
+
+2. **`ops.ingest_run`** — `error_details` JSONB column carries the Python traceback:
+
+   ```sql
+   SELECT status, error_message, error_details->>'error_type' AS error_type,
+          error_details->>'traceback' AS traceback
+   FROM ops.ingest_run WHERE run_id = '<from email>';
+   ```
+
+3. **KEDA retry status:** if the manifest is still in the queue, KEDA will retry up to `replicaRetryLimit=3`. Check job execution list:
+
+   ```bash
+   az containerapp job execution list \
+     --name caj-ventra-ingest-<env> \
+     --resource-group rg-hha-dashboard-<env> \
+     --query "[].{name:name, status:properties.status, start:properties.startTime}" \
+     -o table
+   ```
+
+4. **After 3 retries:** the Event Grid subscription dead-letters to `vendor-deadletter/`. Check:
+
+   ```bash
+   az storage blob list \
+     --account-name <vendor_storage_account> \
+     --container-name vendor-deadletter \
+     --query "[].{name:name, created:properties.creationTime}" \
+     --auth-mode login -o table
+   ```
+
+5. **Manual replay** after fix: clear the DLQ, then upload the manifest again to re-trigger Event Grid.
+
+### Ventra credential rotation (quarterly)
+
+The Ventra SFTP SSH key (or Snowflake-direct SAS token, whichever delivery channel is active) is rotated every 90 days. Set a calendar reminder.
+
+**SFTP path:**
+
+```bash
+# 1. Generate a fresh keypair locally
+ssh-keygen -t ed25519 -f /tmp/ventra-sftp-key -N ''
+
+# 2. Update the Key Vault secret with the public key
+az keyvault secret set \
+  --vault-name kv-hha-<env> \
+  --name ventra-sftp-public-key \
+  --file /tmp/ventra-sftp-key.pub
+
+# 3. Redeploy infra to push the new key onto the storage account local user
+cd hha-dashboard/infra
+az deployment group create -g rg-hha-dashboard-<env> \
+  -f main.bicep -p env/<env>.bicepparam
+
+# 4. Email the new PRIVATE key (/tmp/ventra-sftp-key) to Ventra's secure channel
+#    (DO NOT email the public/.pub file — Ventra needs the private half)
+
+# 5. Delete the local copy and shred from /tmp
+shred -u /tmp/ventra-sftp-key /tmp/ventra-sftp-key.pub
+```
+
+**Snowflake-direct path:**
+
+```bash
+# 1. Generate a new write-scoped SAS token (90-day expiry, write-only)
+az storage container generate-sas \
+  --account-name <vendor_storage_account> \
+  --name vendor-inbound \
+  --permissions wcl \
+  --expiry $(date -u -d '+100 days' '+%Y-%m-%dT%H:%MZ') \
+  --auth-mode login --as-user
+
+# 2. Store the new SAS in KV (with the existing one still active for 10 days
+#    of overlap)
+az keyvault secret set \
+  --vault-name kv-hha-<env> \
+  --name ventra-blob-sas-token-next \
+  --value '<sas-token-from-previous-step>'
+
+# 3. Email the new SAS to Ventra; they configure it in Snowflake's external stage
+
+# 4. After Ventra confirms cutover, swap KV secrets:
+#    promote -next to -current, delete the old -current
+```
+
+### App Insights KQL queries (Ventra ingest)
+
+Pinned for operator copy-paste. All queries scope to the last 7 days by default; widen as needed.
+
+```kql
+// All Ventra events, latest first
+customEvents
+| where name startswith "ventra."
+| where timestamp > ago(7d)
+| project timestamp, name,
+          drop=tostring(customDimensions.drop_date),
+          run=tostring(customDimensions.run_id),
+          corr=tostring(customDimensions.correlation_id)
+| order by timestamp desc
+
+// Just the validation failures (V1-V11, V13)
+customEvents
+| where name == "ventra.validation_failed"
+| where timestamp > ago(30d)
+| project timestamp, drop=tostring(customDimensions.drop_date),
+          rule=tostring(customDimensions.rule),
+          message=tostring(customDimensions.message)
+| order by timestamp desc
+
+// ADR-005 incidents (V12 — CRITICAL)
+customEvents
+| where name == "ventra.adr005_violation"
+| where timestamp > ago(180d)
+
+// Validation-failure rate over time (daily bucket)
+customEvents
+| where name in ("ventra.ingest_complete", "ventra.validation_failed", "ventra.adr005_violation")
+| where timestamp > ago(30d)
+| summarize count() by name, bin(timestamp, 1d)
+| render timechart
+
+// Drops that arrived but never completed (manifest_received without ingest_complete)
+let received = customEvents
+  | where name == "ventra.manifest_received"
+  | project drop=tostring(customDimensions.drop_date), received_at=timestamp;
+let completed = customEvents
+  | where name == "ventra.ingest_complete"
+  | project drop=tostring(customDimensions.drop_date);
+received
+| where drop !in (completed)
+| where received_at > ago(7d)
+| order by received_at desc
+
+// Median end-to-end ingest duration
+customEvents
+| where name == "ventra.ingest_complete"
+| where timestamp > ago(30d)
+| extend duration_s = todouble(customDimensions.duration_seconds)
+| summarize p50 = percentile(duration_s, 50),
+            p95 = percentile(duration_s, 95),
+            p99 = percentile(duration_s, 99),
+            count_ = count()
+```
+
 ---
 
 ## E. What's NOT in this runbook (yet)
