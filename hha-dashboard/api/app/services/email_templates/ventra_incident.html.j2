@@ -1,0 +1,73 @@
+{# Ventra V12 / ADR-005 violation — non-FL facility in feed. INCIDENT. #}
+<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:0;background:#f5f6fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1f2937;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f6fa;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#ffffff;border:2px solid #ef4444;border-radius:12px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px 28px;border-bottom:2px solid #ef4444;background:linear-gradient(135deg,#7f1d1d,#dc2626);color:#ffffff;">
+                <div style="display:inline-block;padding:4px 10px;background:#fbbf24;color:#7c2d12;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">
+                  INCIDENT · ADR-005 VIOLATION
+                </div>
+                <div style="font-size:22px;font-weight:600;margin-top:10px;">Non-Florida facility in Ventra drop — {{ drop_date }}</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 28px;">
+                <p style="margin:0 0 16px 0;font-size:14px;color:#4b5563;">
+                  Ventra delivered a row containing a non-Florida <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:12px;">facility_no</code>, violating the FL-only contract per <strong>ADR-005</strong>. The drop has been quarantined; <strong>no data was written</strong>.
+                </p>
+                <p style="margin:0 0 16px 0;font-size:14px;color:#4b5563;">
+                  This is treated as an incident, not just a quarantine, because it indicates either (a) Ventra's source-side FL filter is broken, or (b) HHA's contract scope drifted without an ADR amendment.
+                </p>
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:14px;border:2px solid #fecaca;border-radius:8px;background:#fef2f2;">
+                  <tr>
+                    <td style="padding:14px 16px;">
+                      <div style="font-size:11px;letter-spacing:0.05em;text-transform:uppercase;color:#991b1b;font-weight:700;">
+                        Rule V12 · ADR-005
+                      </div>
+                      <div style="font-size:14px;color:#374151;margin-top:6px;">{{ message }}</div>
+                    </td>
+                  </tr>
+                </table>
+
+                {% if details %}
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:14px;border:1px solid #e5e7eb;border-radius:8px;">
+                  <tr><td style="padding:12px 16px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;font-weight:600;border-bottom:1px solid #f3f4f6;">Detected</td></tr>
+                  {% for k, v in details.items() %}
+                  <tr><td style="padding:8px 16px;font-size:13px;border-bottom:1px solid #f3f4f6;">
+                    <span style="color:#6b7280;">{{ k }}</span>
+                    <span style="float:right;font-family:monospace;color:#374151;">{{ v }}</span>
+                  </td></tr>
+                  {% endfor %}
+                </table>
+                {% endif %}
+
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:14px;font-size:13px;color:#6b7280;">
+                  <tr><td style="padding:4px 0;">Run ID</td><td style="padding:4px 0;font-family:monospace;color:#374151;">{{ run_id }}</td></tr>
+                  <tr><td style="padding:4px 0;">Correlation ID</td><td style="padding:4px 0;font-family:monospace;color:#374151;">{{ correlation_id }}</td></tr>
+                </table>
+
+                <p style="margin:16px 0 8px 0;font-size:14px;color:#1f2937;font-weight:600;">Immediate triage (security playbook)</p>
+                <ol style="margin:0 0 0 18px;padding:0;font-size:13px;color:#4b5563;line-height:1.6;">
+                  <li>Open <a href="https://github.com/DandaAkhilReddy/hhadashboard/blob/main/hha-dashboard/docs/04-operations/SECURITY_INCIDENT_PLAYBOOK.md" style="color:#dc2626;font-weight:600;">SECURITY_INCIDENT_PLAYBOOK.md</a></li>
+                  <li>Email Ventra leadership (Gilda + David Reck + Suma Bhat) — request immediate source-side FL filter audit</li>
+                  <li>Review reject sidecar: <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:12px;">vendor-quarantine/ventra/{{ drop_date }}/_REJECT_REASON.txt</code></li>
+                  <li>Do NOT replay until Ventra confirms the filter is fixed AND HHA compliance reviews the incident</li>
+                </ol>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 28px;border-top:2px solid #ef4444;background:#fef2f2;font-size:12px;color:#7f1d1d;font-weight:600;">
+                ADR-005 incident · Compliance + IT Director must both ack before resuming Ventra ingestion.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
