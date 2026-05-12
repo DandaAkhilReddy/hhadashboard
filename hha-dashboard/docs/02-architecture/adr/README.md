@@ -13,6 +13,7 @@
 | [003](003-audit-chain.md) | **Audit chain** — Postgres triggers (not ORM listeners), session-scoped `audit.upn` GUC propagation | Locked |
 | [004](004-backup-and-disaster-recovery.md) | **Backup & DR** — managed Postgres PITR + custom pg_dump → Blob WORM, RTO/RPO commitments | Locked |
 | [005](005-fl-tx-scope-split.md) | **FL/TX scope split** — Ventra is FL-only, TX manual-only, `source_system` invariant | Locked |
+| [006](006-ventra-pre-aggregated-feed.md) | **Pre-aggregated Ventra feed** — three daily CSVs via SFTP, manifest-triggered, zero PHI on the wire | Proposed |
 
 ## How to add a new ADR
 
