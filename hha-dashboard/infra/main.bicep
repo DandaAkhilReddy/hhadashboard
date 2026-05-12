@@ -117,6 +117,28 @@ param storage_sku string = 'Standard_LRS'
 @maxValue(365)
 param storage_soft_delete_retention_days int = 7
 
+@description('Enable vendor-inbound Storage Account (Ventra ingest pipeline per ADR-006). Separate from the main storage account because HNS + SFTP are create-time-only properties. Containers: vendor-inbound, vendor-quarantine, vendor-deadletter.')
+param enable_vendor_storage bool = false
+
+@description('Vendor-storage account name. Convention: sthhavendor{env} (lowercase, alphanumeric, globally unique). Default composes from env.')
+param vendor_storage_account_name string = 'sthhavendor${env_name}${uniqueString(resourceGroup().id)}'
+
+@description('Vendor-storage SKU. Standard_LRS for dev, Standard_ZRS for prod (zone-redundant since vendor drops cannot be replayed if lost).')
+@allowed(['Standard_LRS', 'Standard_GRS', 'Standard_RAGRS', 'Standard_ZRS'])
+param vendor_storage_sku string = 'Standard_LRS'
+
+@description('Days after which vendor-inbound + vendor-quarantine blobs are auto-deleted. 90 = HIPAA audit retention window.')
+@minValue(0)
+@maxValue(365)
+param vendor_storage_lifecycle_delete_days int = 90
+
+@description('Enable SFTP service on the vendor-storage account. Adds ~$220/mo. Leave false if Ventra picks Snowflake-direct (SAS-token external stage) instead. Toggled per the architecture A3 decision.')
+param enable_sftp bool = false
+
+@secure()
+@description('Ventra SFTP public SSH key (full OpenSSH-format public key content). Only consumed when enable_sftp is true. Rotated quarterly via Key Vault.')
+param ventra_sftp_public_key string = ''
+
 @description('Enable Azure Communication Services (Email) for the daily 7am exec digest + credential expiry alerts. Uses an Azure Managed Domain in v0 (sender DoNotReply@<random>.azurecomm.net); custom domain attachment is a follow-up.')
 param enable_email bool = false
 
@@ -234,6 +256,29 @@ module storage './modules/storage.bicep' = if (enable_storage) {
     location: location
     sku: storage_sku
     soft_delete_retention_days: storage_soft_delete_retention_days
+    deployer_workstation_ip: deployer_workstation_ip
+    pe_subnet_id: enable_vnet ? vnet!.outputs.pe_subnet_id : ''
+    tags: tags
+  }
+}
+
+// Vendor-inbound Storage Account — Ventra ingest pipeline per ADR-006.
+// Separate account because HNS + SFTP are create-time-only properties; the
+// existing storage account was provisioned without them. Containers:
+// vendor-inbound, vendor-quarantine, vendor-deadletter. Local user `ventra`
+// is provisioned only when both enable_sftp is true AND a public key is
+// supplied — otherwise the account is still SAS-token-accessible for the
+// Snowflake-direct delivery channel (per Phase 1A.A3 of the plan).
+module vendorStorage './modules/vendor_storage.bicep' = if (enable_vendor_storage) {
+  name: 'vendor-storage-deploy'
+  params: {
+    name: vendor_storage_account_name
+    location: location
+    sku: vendor_storage_sku
+    soft_delete_retention_days: storage_soft_delete_retention_days
+    vendor_lifecycle_delete_days: vendor_storage_lifecycle_delete_days
+    enable_sftp: enable_sftp
+    ventra_sftp_public_key: ventra_sftp_public_key
     deployer_workstation_ip: deployer_workstation_ip
     pe_subnet_id: enable_vnet ? vnet!.outputs.pe_subnet_id : ''
     tags: tags

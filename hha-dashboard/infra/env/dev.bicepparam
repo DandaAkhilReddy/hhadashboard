@@ -49,6 +49,17 @@ param enable_storage = false
 param storage_sku = 'Standard_LRS'
 param storage_soft_delete_retention_days = 7
 
+// Vendor-inbound Storage — Ventra ingest pipeline per ADR-006. Off in dev
+// until Ventra confirms the delivery shape (SFTP vs Snowflake-direct).
+// Once they confirm + we have their SSH public key (SFTP path) or their
+// Snowflake account ID (direct path), flip enable_vendor_storage to true
+// here and seed ventra_sftp_public_key at deploy time via the -p flag.
+param enable_vendor_storage = false
+param vendor_storage_sku = 'Standard_LRS'
+param vendor_storage_lifecycle_delete_days = 90
+param enable_sftp = false
+param ventra_sftp_public_key = ''
+
 // Monitor — off in dev to save Log Analytics ingestion costs (~$2.30/GB).
 param enable_monitor = false
 param monitor_retention_days = 30

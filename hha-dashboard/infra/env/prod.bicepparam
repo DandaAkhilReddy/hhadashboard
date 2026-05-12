@@ -61,6 +61,25 @@ param enable_storage = true
 param storage_sku = 'Standard_RAGRS'
 param storage_soft_delete_retention_days = 90
 
+// Vendor-inbound Storage — Ventra ingest pipeline per ADR-006. Stays OFF
+// in prod until ALL of the following are true:
+//   1. Ventra has confirmed (in writing) the pre-aggregated delivery shape
+//   2. Delivery channel choice locked: SFTP or Snowflake-direct
+//   3. If SFTP: Ventra's public SSH key received and seeded into KV under
+//      'ventra-sftp-public-key' (rotated quarterly thereafter)
+//   4. If Snowflake-direct: SAS token generated, scoped to vendor-inbound
+//      with write-only permissions, communicated to Ventra via secure
+//      channel, also seeded into KV
+// Until then enable_vendor_storage stays false so the resource is never
+// provisioned and the ~$220/mo SFTP service fee doesn't accrue.
+// Standard_ZRS in prod — vendor drops cannot be replayed if the storage
+// account's region goes down, so zone redundancy is worth the small uplift.
+param enable_vendor_storage = false
+param vendor_storage_sku = 'Standard_ZRS'
+param vendor_storage_lifecycle_delete_days = 90
+param enable_sftp = false
+param ventra_sftp_public_key = ''
+
 // Monitor — ON in prod. Required for HIPAA audit chain.
 param enable_monitor = true
 param monitor_retention_days = 90
