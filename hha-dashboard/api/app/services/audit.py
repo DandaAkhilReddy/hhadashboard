@@ -34,6 +34,12 @@ AUDITED_TABLES: frozenset[tuple[str, str]] = frozenset(
         ("entries", "monthly_finance_manual"),
         ("entries", "weekly_clinical"),
         ("entries", "weekly_hr_manual"),
+        # Added in migration 0011 (Ventra pre-aggregated facts per ADR-006).
+        # Test coverage in tests/test_audit_triggers.py::AUDITED_TABLES_FQN +
+        # TABLE_OPS follows in commit C3b.
+        ("entries", "fact_collections_daily"),
+        ("entries", "fact_ar_snapshot"),
+        ("entries", "fact_revenue_by_physician_mo"),
     }
 )
 
