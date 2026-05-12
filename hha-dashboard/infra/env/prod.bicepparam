@@ -94,6 +94,23 @@ param enable_ventra_ingest_job = false
 param ventra_ingest_image = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 param ventra_ops_email_recipients = 'areddy@hhamedicine.com,crystal@hhamedicine.com'
 
+// Azure Monitor alerts. ON in prod once enable_monitor is on (always true
+// per HIPAA audit chain). Three rules fire: validation_failed (Sev 2 Warn),
+// adr005_violation (Sev 0 Critical), ingest_failed (Sev 1 Error). All
+// route through ag-vendor-ingest-prod Action Group → email recipients
+// below. Flip to true on the same deploy as enable_monitor.
+param enable_vendor_alerts = false
+param vendor_alerts_email_receivers = [
+  {
+    name: 'akhil'
+    emailAddress: 'areddy@hhamedicine.com'
+  }
+  {
+    name: 'crystal'
+    emailAddress: 'crystal@hhamedicine.com'
+  }
+]
+
 // Monitor — ON in prod. Required for HIPAA audit chain.
 param enable_monitor = true
 param monitor_retention_days = 90

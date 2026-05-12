@@ -151,6 +151,12 @@ param ventra_ingest_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:lates
 @description('Ops recipient list for ventra_ingest notifications (success / quarantine / failure / incident). Comma-separated email addresses.')
 param ventra_ops_email_recipients string = 'areddy@hhamedicine.com'
 
+@description('Enable Azure Monitor alert rules for vendor-ingest (App Insights log alerts on ventra.validation_failed, ventra.adr005_violation, ventra.ingest_failed). Requires enable_monitor + enable_container_jobs.')
+param enable_vendor_alerts bool = false
+
+@description('Email receivers for the vendor-ingest Action Group. Array of {name, emailAddress} objects. Each receiver fan-outs from every alert below.')
+param vendor_alerts_email_receivers array = []
+
 @description('Enable Azure Communication Services (Email) for the daily 7am exec digest + credential expiry alerts. Uses an Azure Managed Domain in v0 (sender DoNotReply@<random>.azurecomm.net); custom domain attachment is a follow-up.')
 param enable_email bool = false
 
@@ -402,6 +408,21 @@ module containerjobs './modules/containerjobs.bicep' = if (enable_container_jobs
     vendorStorage
     vendorEventGrid
   ]
+}
+
+// Vendor-ingest Azure Monitor alerts per Phase 1A.A9. Three log-query
+// alerts (validation_failed, adr005_violation, ingest_failed) routed
+// through a dedicated Action Group. Requires enable_monitor (need App
+// Insights as the scope) — gated separately so we can validate the alert
+// rules against a dev workspace before turning them on in prod.
+module vendorAlerts './modules/vendor_alerts.bicep' = if (enable_vendor_alerts && enable_monitor) {
+  name: 'vendor-alerts-deploy'
+  params: {
+    env_name_prefix: env_name
+    app_insights_id: monitor!.outputs.app_insights_id
+    email_receivers: vendor_alerts_email_receivers
+    tags: tags
+  }
 }
 
 // Cross-resource role assignments (AcrPull, Storage Blob Data Contributor,

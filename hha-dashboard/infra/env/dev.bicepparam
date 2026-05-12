@@ -74,6 +74,17 @@ param enable_ventra_ingest_job = false
 param ventra_ingest_image = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 param ventra_ops_email_recipients = 'areddy@hhamedicine.com'
 
+// Azure Monitor alerts for the vendor-ingest pipeline. Off in dev (no App
+// Insights, no need to alert on placeholder events). Flip to true after
+// enable_monitor goes on in dev for end-to-end smoke testing.
+param enable_vendor_alerts = false
+param vendor_alerts_email_receivers = [
+  {
+    name: 'akhil'
+    emailAddress: 'areddy@hhamedicine.com'
+  }
+]
+
 // Monitor — off in dev to save Log Analytics ingestion costs (~$2.30/GB).
 param enable_monitor = false
 param monitor_retention_days = 30
