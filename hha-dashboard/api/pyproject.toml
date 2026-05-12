@@ -20,6 +20,7 @@ dependencies = [
     "azure-identity>=1.19.0",
     "azure-keyvault-secrets>=4.9.0",
     "azure-storage-blob>=12.23.0",
+    "azure-storage-queue>=12.10.0",
     "azure-ai-documentintelligence>=1.0.0",
     "rapidfuzz>=3.10.0",
     "pandas>=2.2.0",
