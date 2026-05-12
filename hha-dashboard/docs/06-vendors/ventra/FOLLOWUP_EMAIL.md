@@ -183,6 +183,21 @@ build the dashboard tiles in waves.
 Happy to send a calendar invite for the week of May 18 or May 25,
 whichever fits your team's return — no rush from our side.
 
+One quick note on the mechanics, since I understand Ventra runs on
+Snowflake: the three outputs above line up cleanly with the standard
+Snowflake export pattern — three scheduled tasks running aggregate
+queries against your existing client-reporting models, with COPY INTO
+writing the CSVs to cloud storage. No new aggregation logic on your
+side, just a new export target.
+
+A note on the delivery channel: SFTP works well for HHA and is what
+the spec above assumes, but if a Snowflake external stage writing
+directly to Azure Blob is easier on your side, that works equally
+well for us. We can provide a write-scoped SAS token for a dedicated
+container, or a private link if your security team prefers that.
+Happy to let your engineering lead pick the path of least resistance
+in the follow-up working session.
+
 Thank you again for the time on the 5th, and for the spec.
 
 Best regards,
