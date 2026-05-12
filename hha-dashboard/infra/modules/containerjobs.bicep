@@ -66,6 +66,29 @@ param azure_communication_sender string = ''
 @secure()
 param database_url string = ''
 
+// ---------------------------------------------------------------------------
+// ventra_ingest — event-driven Container Apps Job per ADR-006 + Phase 1A.A1
+// ---------------------------------------------------------------------------
+
+@description('Enable the ventra_ingest event-driven Container Apps Job. Requires enable_vendor_storage + enable_vendor_eventgrid AND a real ventra_ingest image in ACR. Gated separately so the env + storage + EG can land in earlier deploys.')
+param enable_ventra_ingest_job bool = false
+
+@description('Container image for ventra_ingest. Default is the Microsoft placeholder; replace with acrhha{env}.azurecr.io/ventra-ingest:{sha} once CI image-push lands (C20).')
+param ventra_ingest_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
+@description('Vendor-storage account name (output of vendor_storage.bicep). Required when enable_ventra_ingest_job is true — used for the queue connection string and the STORAGE_ACCOUNT env var.')
+param vendor_storage_account_name string = ''
+
+@description('Manifest queue name on the vendor-storage account. KEDA azure-queue scaler binds to this queue. Must match the queue name in vendor_eventgrid.bicep.')
+param manifest_queue_name string = 'q-ventra-manifests'
+
+@secure()
+@description('Application Insights connection string for ventra_ingest custom events + structured logs. KV reference in prod; empty disables App Insights export (job still runs).')
+param app_insights_connection_string string = ''
+
+@description('Ops recipient list for ventra_ingest notifications (success / quarantine / failure / incident). Comma-separated email addresses.')
+param ventra_ops_email_recipients string = 'areddy@hhamedicine.com'
+
 @description('Tags applied to every resource.')
 param tags object = {}
 
@@ -233,6 +256,112 @@ resource credScanJob 'Microsoft.App/jobs@2024-03-01' = if (enable_alert_jobs) {
   }
 }
 
+// =========================================================================
+// ventra_ingest — event-driven KEDA azure-queue scaler on q-ventra-manifests.
+// Per Phase 1A.A1 of the plan:
+//   - Trigger: Event (NOT Schedule)
+//   - Scaler: azure-queue, queueLength=1, concurrency=1 (parallelism=1 +
+//             replicaCompletionCount=1 = strict serialization, prevents
+//             two replicas processing the same manifest race)
+//   - Replica timeout: 600s (well above the ~30s expected ingest)
+//   - Retry: 3x exponential before DLQ
+//   - Resources: 0.5 vCPU, 1 GiB (sized for the pre-aggregated CSVs, NOT
+//                row-level — the architecture lock prevents row-level)
+//   - Identity: SystemAssigned (matches existing job pattern; can migrate
+//                to UserAssigned later for cross-tenant scenarios)
+//
+// Authentication note: the KEDA scaler authenticates to Storage Queue via
+// a connection string secret (built at deploy time from listKeys() on the
+// vendor-storage account). Storage Blob Data Contributor / Storage Queue
+// Data Message Processor role assignments on the job's MI are wired in
+// rbac.bicep (separate concern; this module only declares the job).
+// =========================================================================
+
+resource vendorStorageRef 'Microsoft.Storage/storageAccounts@2024-01-01' existing = if (enable_ventra_ingest_job) {
+  name: vendor_storage_account_name
+}
+
+resource ventraIngestJob 'Microsoft.App/jobs@2024-03-01' = if (enable_ventra_ingest_job) {
+  name: 'job-ventra-ingest-${env_name_prefix}'
+  location: location
+  tags: tags
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    environmentId: env.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Event'
+      replicaTimeout: 600
+      replicaRetryLimit: 3
+      eventTriggerConfig: {
+        replicaCompletionCount: 1
+        parallelism: 1
+        scale: {
+          minExecutions: 0
+          maxExecutions: 5
+          pollingInterval: 30
+          rules: [
+            {
+              name: 'q-ventra-manifests-trigger'
+              type: 'azure-queue'
+              metadata: {
+                accountName: vendor_storage_account_name
+                queueName: manifest_queue_name
+                queueLength: '1'
+              }
+              auth: [
+                {
+                  secretRef: 'vendor-storage-connection-string'
+                  triggerParameter: 'connection'
+                }
+              ]
+            }
+          ]
+        }
+      }
+      secrets: [
+        {
+          name: 'database-url'
+          value: database_url
+        }
+        {
+          name: 'app-insights-connection'
+          value: app_insights_connection_string
+        }
+        {
+          name: 'vendor-storage-connection-string'
+          value: enable_ventra_ingest_job ? 'DefaultEndpointsProtocol=https;AccountName=${vendorStorageRef!.name};AccountKey=${vendorStorageRef!.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}' : ''
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'ventra-ingest'
+          image: ventra_ingest_image
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            { name: 'ENV_NAME', value: env_name_prefix }
+            { name: 'STORAGE_ACCOUNT', value: vendor_storage_account_name }
+            { name: 'MANIFEST_QUEUE_NAME', value: manifest_queue_name }
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
+            { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'app-insights-connection' }
+            { name: 'AZURE_COMMUNICATION_ENDPOINT', value: azure_communication_endpoint }
+            { name: 'AZURE_COMMUNICATION_SENDER', value: azure_communication_sender }
+            { name: 'ALERT_EMAIL_FROM', value: azure_communication_sender }
+            { name: 'ALERT_EMAIL_TO_OPS', value: ventra_ops_email_recipients }
+          ]
+        }
+      ]
+    }
+  }
+}
+
 @description('Container Apps environment resource ID — used by main.bicep to wire additional Job resources later.')
 output env_id string = env.id
 
@@ -250,3 +379,9 @@ output alert_digest_principal_id string = enable_alert_jobs ? alertDigestJob!.id
 
 @description('cred_scan job principal ID — same role assignment as alert_digest.')
 output cred_scan_principal_id string = enable_alert_jobs ? credScanJob!.identity.principalId : ''
+
+@description('ventra_ingest job resource ID — needed for diagnostic-settings + alert wiring in C8.')
+output ventra_ingest_job_id string = enable_ventra_ingest_job ? ventraIngestJob!.id : ''
+
+@description('ventra_ingest job principal ID (System-Assigned MI). Wire to Storage Blob Data Contributor on vendor-storage + Storage Queue Data Message Processor on q-ventra-manifests + Key Vault Secrets User on the KV via rbac.bicep.')
+output ventra_ingest_principal_id string = enable_ventra_ingest_job ? ventraIngestJob!.identity.principalId : ''

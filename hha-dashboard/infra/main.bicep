@@ -142,6 +142,15 @@ param ventra_sftp_public_key string = ''
 @description('Enable Event Grid system topic + manifest subscription + Storage Queue on the vendor-storage account. Requires enable_vendor_storage = true. When this is false the vendor-storage account still exists but blob events are silently dropped.')
 param enable_vendor_eventgrid bool = false
 
+@description('Enable the ventra_ingest event-driven Container Apps Job (KEDA azure-queue scaler on q-ventra-manifests). Requires enable_container_jobs + enable_vendor_storage + enable_vendor_eventgrid AND a real image in ACR.')
+param enable_ventra_ingest_job bool = false
+
+@description('Container image for ventra_ingest. Replace with acrhha{env}.azurecr.io/ventra-ingest:{sha} once C20 CI image-push lands.')
+param ventra_ingest_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
+@description('Ops recipient list for ventra_ingest notifications (success / quarantine / failure / incident). Comma-separated email addresses.')
+param ventra_ops_email_recipients string = 'areddy@hhamedicine.com'
+
 @description('Enable Azure Communication Services (Email) for the daily 7am exec digest + credential expiry alerts. Uses an Azure Managed Domain in v0 (sender DoNotReply@<random>.azurecomm.net); custom domain attachment is a follow-up.')
 param enable_email bool = false
 
@@ -375,8 +384,24 @@ module containerjobs './modules/containerjobs.bicep' = if (enable_container_jobs
     database_url: enable_keyvault
       ? '@Microsoft.KeyVault(VaultName=${kv_name};SecretName=database-url)'
       : database_url_literal
+    // ventra_ingest: gated on vendor-storage + EG + Container Apps env all
+    // being deployed. The job declaration itself is also internally gated
+    // by enable_ventra_ingest_job — passing false here skips the entire
+    // resource even if vendor-storage exists.
+    enable_ventra_ingest_job: enable_ventra_ingest_job && enable_vendor_storage && enable_vendor_eventgrid
+    ventra_ingest_image: ventra_ingest_image
+    vendor_storage_account_name: vendor_storage_account_name
+    app_insights_connection_string: enable_monitor ? monitor!.outputs.app_insights_connection_string : ''
+    ventra_ops_email_recipients: ventra_ops_email_recipients
     tags: tags
   }
+  dependsOn: [
+    // Bicep can usually infer this from the references above, but the
+    // listKeys() call on vendor-storage inside containerjobs needs the
+    // resource to exist before evaluation. Explicit edge for safety.
+    vendorStorage
+    vendorEventGrid
+  ]
 }
 
 // Cross-resource role assignments (AcrPull, Storage Blob Data Contributor,

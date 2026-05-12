@@ -85,6 +85,14 @@ param ventra_sftp_public_key = ''
 // lettering legitimate vendor drops to vendor-deadletter before anyone
 // notices.
 param enable_vendor_eventgrid = false
+// ventra_ingest event-driven Container Apps Job. Stays off in prod until
+// (a) vendor-storage + EG have been validated end-to-end in dev, (b) the
+// real ventra-ingest image is in acrhhaprod, and (c) Ventra has signaled
+// they're ready to send a test drop. Three-gate discipline prevents a
+// half-built job from spinning up against unfinished infra.
+param enable_ventra_ingest_job = false
+param ventra_ingest_image = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+param ventra_ops_email_recipients = 'areddy@hhamedicine.com,crystal@hhamedicine.com'
 
 // Monitor — ON in prod. Required for HIPAA audit chain.
 param enable_monitor = true

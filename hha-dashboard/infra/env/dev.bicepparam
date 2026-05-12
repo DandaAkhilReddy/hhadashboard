@@ -65,6 +65,14 @@ param ventra_sftp_public_key = ''
 // account). Two-stage rollout = land storage first, validate manually,
 // then wire the EG path.
 param enable_vendor_eventgrid = false
+// ventra_ingest event-driven Container Apps Job. Default off; flip to true
+// when (a) the placeholder image is replaced by a real ACR-pushed
+// ventra-ingest:{sha} (C20 CI workflow + C9-C16 Python code), and (b) the
+// dependencies (enable_container_jobs + enable_vendor_storage +
+// enable_vendor_eventgrid) are all on.
+param enable_ventra_ingest_job = false
+param ventra_ingest_image = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+param ventra_ops_email_recipients = 'areddy@hhamedicine.com'
 
 // Monitor — off in dev to save Log Analytics ingestion costs (~$2.30/GB).
 param enable_monitor = false
