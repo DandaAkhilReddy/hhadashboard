@@ -74,8 +74,27 @@ jobs:
       - name: Apply migrations
         run: uv run alembic upgrade head
 
-      - name: Test (pytest)
-        run: uv run pytest -v
+      - name: Test (pytest with coverage)
+        # Phase 3 stair-step: thresholds in pyproject.toml stay at 0 until
+        # baseline is measured here, then raise +5pp every ~10 commits to the
+        # final 96 line / 85 branch gate. --cov-fail-under is the gate switch.
+        run: >-
+          uv run pytest -v
+          --cov --cov-branch
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-report=html
+          --cov-fail-under=0
+
+      - name: Upload coverage report (api)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-api
+          path: |
+            hha-dashboard/api/htmlcov/
+            hha-dashboard/api/coverage.xml
+          retention-days: 14
 
   # ---------------------------------------------------------------------------
   # Web — Next.js + biome + tsc + vitest. No DB needed.
@@ -107,8 +126,18 @@ jobs:
       - name: Typecheck (tsc)
         run: npm run typecheck
 
-      - name: Test (vitest)
-        run: npm run test
+      - name: Test (vitest with coverage)
+        # Phase 3 stair-step: thresholds in vitest.config.ts stay at 0 until
+        # baseline is measured here, then raise toward 96 line / 85 branch.
+        run: npm run test:coverage
+
+      - name: Upload coverage report (web)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-web
+          path: hha-dashboard/web/coverage/
+          retention-days: 14
 
   # ---------------------------------------------------------------------------
   # E2E — Playwright Chromium. Hermetic: a tiny Node mock-api at port 8123
