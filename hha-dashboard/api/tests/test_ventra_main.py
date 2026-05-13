@@ -20,10 +20,9 @@ import json
 import uuid
 from datetime import date
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
-
 
 pytestmark = pytest.mark.asyncio
 
@@ -72,7 +71,7 @@ def test_parse_event_grid_payload_rejects_missing_subject() -> None:
 def test_parse_event_grid_payload_rejects_unexpected_subject() -> None:
     from jobs.ventra_ingest.main import _parse_event_grid_payload
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unexpected subject"):
         _parse_event_grid_payload(json.dumps(_eg_event("/somewhere/else")))
 
 
@@ -80,7 +79,7 @@ def test_parse_event_grid_payload_rejects_non_ventra_prefix() -> None:
     from jobs.ventra_ingest.main import _parse_event_grid_payload
 
     subj = "/blobServices/default/containers/vendor-inbound/blobs/quest/2026-05-15/_MANIFEST.csv"
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unexpected blob path"):
         _parse_event_grid_payload(json.dumps(_eg_event(subj)))
 
 
@@ -119,10 +118,10 @@ class _OrchestratorHarness:
         # --- session ---
         class _SessCtx:
             harness = self
-            async def __aenter__(self_inner) -> Any:
+            async def __aenter__(self_inner) -> Any:  # noqa: N805 — closure on outer harness
                 self.session_used = True
                 return MagicMock(name="session")
-            async def __aexit__(self_inner, *a: Any) -> None:
+            async def __aexit__(self_inner, *a: Any) -> None:  # noqa: N805
                 return None
         monkeypatch.setattr(main_mod, "SessionLocal", lambda: _SessCtx())
 
@@ -136,56 +135,56 @@ class _OrchestratorHarness:
         class _FakeRun:
             run_id = harness.allocated_run_id
             @classmethod
-            async def start(cls, db: Any, *, drop_date: date, manifest_path: str, correlation_id: uuid.UUID) -> "_FakeRun":
+            async def start(cls, db: Any, *, drop_date: date, manifest_path: str, correlation_id: uuid.UUID) -> _FakeRun:  # noqa: ARG003
                 harness.run_start_calls.append({
                     "drop_date": drop_date,
                     "manifest_path": manifest_path,
                     "correlation_id": correlation_id,
                 })
                 return cls()
-            async def complete(self_inner, db: Any, **kwargs: Any) -> None:
+            async def complete(self_inner, db: Any, **kwargs: Any) -> None:  # noqa: ARG002, N805
                 harness.run_complete_calls.append(kwargs)
         monkeypatch.setattr(main_mod, "IngestRun", _FakeRun)
 
         # --- load_manifest ---
-        async def fake_load(drop_date: date, manifest_path: str) -> tuple:
+        async def fake_load(drop_date: date, manifest_path: str) -> tuple:  # noqa: ARG001
             if isinstance(self.load_manifest_result, Exception):
                 raise self.load_manifest_result
             return self.load_manifest_result
         monkeypatch.setattr(main_mod, "load_manifest", fake_load)
 
         # --- parse_file ---
-        def fake_parse(file_name: str, data: bytes) -> list:
+        def fake_parse(file_name: str, data: bytes) -> list:  # noqa: ARG001
             return self.parse_file_result.get(file_name, [])
         monkeypatch.setattr(main_mod, "parse_file", fake_parse)
 
         # --- validators ---
-        def fake_drop_consistency(parsed: dict, drop_date: date) -> None:
+        def fake_drop_consistency(parsed: dict, drop_date: date) -> None:  # noqa: ARG001
             return None
         monkeypatch.setattr(main_mod, "validate_drop_consistency", fake_drop_consistency)
 
-        def fake_ar_sum(rows: Any) -> None:
+        def fake_ar_sum(rows: Any) -> None:  # noqa: ARG001
             return None
         monkeypatch.setattr(main_mod, "validate_ar_buckets_sum", fake_ar_sum)
 
-        async def fake_fl_only(db: Any, parsed: dict) -> None:
+        async def fake_fl_only(db: Any, parsed: dict) -> None:  # noqa: ARG001
             if self.fl_only_side_effect is not None:
                 raise self.fl_only_side_effect
         monkeypatch.setattr(main_mod, "validate_fl_only", fake_fl_only)
 
-        async def fake_check_dedup(db: Any, manifest: Any) -> Any:
+        async def fake_check_dedup(db: Any, manifest: Any) -> Any:  # noqa: ARG001
             return self.dedup_decision
         monkeypatch.setattr(main_mod, "check_dedup", fake_check_dedup)
 
         # --- ingest_drop ---
-        async def fake_ingest_drop(db: Any, parsed: dict, manifest: Any, run_id: uuid.UUID) -> Any:
+        async def fake_ingest_drop(db: Any, parsed: dict, manifest: Any, run_id: uuid.UUID) -> Any:  # noqa: ARG001
             if self.ingest_drop_side_effect is not None:
                 raise self.ingest_drop_side_effect
             return self.ingest_drop_result
         monkeypatch.setattr(main_mod, "ingest_drop", fake_ingest_drop)
 
         # --- quarantine ---
-        async def fake_quarantine(drop_date: date, reason: Exception, run_id: uuid.UUID, correlation_id: uuid.UUID) -> None:
+        async def fake_quarantine(drop_date: date, reason: Exception, run_id: uuid.UUID, correlation_id: uuid.UUID) -> None:  # noqa: ARG001
             self.quarantine_calls.append({
                 "drop_date": drop_date,
                 "reason_rule": getattr(reason, "rule", None),
@@ -202,7 +201,7 @@ class _OrchestratorHarness:
 
         # --- notify_* ---
         async def _make_notify(name: str):
-            async def fake(*args: Any, **kwargs: Any) -> list[str]:
+            async def fake(*args: Any, **kwargs: Any) -> list[str]:  # noqa: ARG001
                 self.notify_calls.append((name, dict(kwargs)))
                 return []
             return fake
@@ -346,7 +345,6 @@ async def test_adr_violation_routes_to_incident_path(monkeypatch: pytest.MonkeyP
 async def test_validation_error_routes_to_quarantine_path(monkeypatch: pytest.MonkeyPatch) -> None:
     from jobs.ventra_ingest.exceptions import ValidationError
     h = _OrchestratorHarness()
-    drop = date(2026, 5, 15)
     h.load_manifest_result = ValidationError(
         rule="V3", message="sha256 mismatch on collections.csv",
         details={"file_name": "collections.csv"},
@@ -405,7 +403,7 @@ async def test_validation_error_caught_before_adr_check_does_not_emit_adr005(mon
 
     from jobs.ventra_ingest import main as main_mod
 
-    async def raise_v13(db: Any, manifest: Any) -> Any:
+    async def raise_v13(db: Any, manifest: Any) -> Any:  # noqa: ARG001
         raise ValidationError(rule="V13", message="redelivery with changed content", details={})
 
     h.install(monkeypatch)

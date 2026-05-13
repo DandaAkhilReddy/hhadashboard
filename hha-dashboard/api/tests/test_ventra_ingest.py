@@ -22,10 +22,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.exc import IntegrityError
-
 from jobs.ventra_ingest.ingest import (
-    IngestResult,
     IngestRun,
     ingest_drop,
 )
@@ -35,7 +32,7 @@ from jobs.ventra_ingest.parsers import (
     CollectionsRow,
     PhysicianMonthlyRow,
 )
-
+from sqlalchemy.exc import IntegrityError
 
 pytestmark = pytest.mark.asyncio
 
@@ -304,7 +301,7 @@ async def test_ingest_drop_emits_processed_files_row_per_manifest_entry() -> Non
     processed_calls = db.execute.await_args_list[2:]
     assert len(processed_calls) == 2
 
-    for call, expected_file in zip(processed_calls, ["collections.csv", "ar_snapshot.csv"]):
+    for call, expected_file in zip(processed_calls, ["collections.csv", "ar_snapshot.csv"], strict=True):
         sql_text = str(call.args[0])
         params = call.args[1]
         assert "INSERT INTO ops.processed_files" in sql_text

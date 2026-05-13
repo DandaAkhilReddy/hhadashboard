@@ -14,10 +14,6 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.deps import SessionLocal
 from jobs.ventra_ingest.exceptions import ADRViolation, ValidationError
 from jobs.ventra_ingest.manifest import Manifest, ManifestEntry
 from jobs.ventra_ingest.parsers import ARSnapshotRow, CollectionsRow
@@ -28,7 +24,10 @@ from jobs.ventra_ingest.validators import (
     validate_drop_consistency,
     validate_fl_only,
 )
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.deps import SessionLocal
 
 pytestmark = pytest.mark.asyncio
 

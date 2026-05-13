@@ -14,11 +14,6 @@ from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
-
-from app.deps import SessionLocal
-from app.main import app
-from app.services.audit import set_current_upn
 from jobs.ventra_ingest.ingest import IngestRun, ingest_drop
 from jobs.ventra_ingest.manifest import Manifest, ManifestEntry
 from jobs.ventra_ingest.parsers import (
@@ -26,7 +21,11 @@ from jobs.ventra_ingest.parsers import (
     CollectionsRow,
     PhysicianMonthlyRow,
 )
+from sqlalchemy import text
 
+from app.deps import SessionLocal
+from app.main import app
+from app.services.audit import set_current_upn
 
 pytestmark = pytest.mark.asyncio
 
@@ -137,7 +136,7 @@ async def _can_connect() -> bool:
 
 
 @pytest.fixture
-async def _seeded_drop():
+async def seeded_drop():
     """Insert one row into each fact table for a fresh test run_id.
     Cleanup deletes by run_id. Skips the test if Postgres is unreachable."""
     if not await _can_connect():
@@ -204,9 +203,9 @@ async def _seeded_drop():
             await db.commit()
 
 
-async def test_daily_collections_returns_seeded_row(_seeded_drop: dict) -> None:
-    facility = _seeded_drop["facility_no"]
-    drop = _seeded_drop["drop_date"]
+async def test_daily_collections_returns_seeded_row(seeded_drop: dict) -> None:
+    facility = seeded_drop["facility_no"]
+    drop = seeded_drop["drop_date"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get(
             f"/api/v1/finance/daily-collections?date_from={drop}&date_to={drop}&facility_no={facility}",
@@ -219,12 +218,12 @@ async def test_daily_collections_returns_seeded_row(_seeded_drop: dict) -> None:
     assert row["facility_no"] == facility
     assert row["payer_class"] == "commercial"
     assert row["net_revenue"] == "7300.00"
-    assert uuid.UUID(row["ingest_run_id"]) == _seeded_drop["run_id"]
+    assert uuid.UUID(row["ingest_run_id"]) == seeded_drop["run_id"]
 
 
-async def test_ar_snapshot_returns_seeded_row(_seeded_drop: dict) -> None:
-    facility = _seeded_drop["facility_no"]
-    drop = _seeded_drop["drop_date"]
+async def test_ar_snapshot_returns_seeded_row(seeded_drop: dict) -> None:
+    facility = seeded_drop["facility_no"]
+    drop = seeded_drop["drop_date"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get(
             f"/api/v1/finance/ar-snapshot?snapshot_date={drop}&facility_no={facility}",
@@ -237,9 +236,9 @@ async def test_ar_snapshot_returns_seeded_row(_seeded_drop: dict) -> None:
     assert body["rows"][0]["outstanding_amount"] == "50000.00"
 
 
-async def test_physician_monthly_returns_seeded_row(_seeded_drop: dict) -> None:
-    facility = _seeded_drop["facility_no"]
-    month = _seeded_drop["month"]
+async def test_physician_monthly_returns_seeded_row(seeded_drop: dict) -> None:
+    facility = seeded_drop["facility_no"]
+    month = seeded_drop["month"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get(
             f"/api/v1/finance/physician-monthly?month={month}&facility_no={facility}",
@@ -252,9 +251,9 @@ async def test_physician_monthly_returns_seeded_row(_seeded_drop: dict) -> None:
     assert body["rows"][0]["encounters_count"] == 42
 
 
-async def test_daily_collections_filters_out_other_facilities(_seeded_drop: dict) -> None:
+async def test_daily_collections_filters_out_other_facilities(seeded_drop: dict) -> None:
     """Filter mismatch returns empty (not 404)."""
-    drop = _seeded_drop["drop_date"]
+    drop = seeded_drop["drop_date"]
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get(
             f"/api/v1/finance/daily-collections?date_from={drop}&date_to={drop}&facility_no=999999",

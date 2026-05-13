@@ -12,8 +12,6 @@ from datetime import date
 from typing import Any
 
 import pytest
-
-from app.services.email import render_email_template
 from jobs.ventra_ingest.notify import (
     notify_failure,
     notify_incident,
@@ -22,6 +20,7 @@ from jobs.ventra_ingest.notify import (
     parse_recipients,
 )
 
+from app.services.email import render_email_template
 
 pytestmark = pytest.mark.asyncio
 
@@ -148,10 +147,7 @@ class _EmailSpy:
         self.sends: list[dict[str, Any]] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        async def fake_send(
-            self_, to: str, subject: str, html_body: str,
-            plain_text_body: str | None = None,
-        ) -> str | None:
+        async def fake_send(self_, to: str, subject: str, html_body: str, plain_text_body: str | None = None) -> str | None:  # noqa: ARG001 — self_ stands in for the bound EmailService
             self.sends.append(
                 {
                     "to": to,

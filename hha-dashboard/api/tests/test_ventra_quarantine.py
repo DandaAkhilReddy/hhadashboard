@@ -12,7 +12,6 @@ from datetime import date
 from typing import Any
 
 import pytest
-
 from jobs.ventra_ingest.exceptions import ADRViolation, ValidationError
 from jobs.ventra_ingest.quarantine import (
     REJECT_REASON_FILE,
@@ -21,7 +20,6 @@ from jobs.ventra_ingest.quarantine import (
     _build_sidecar,
     quarantine_drop,
 )
-
 
 pytestmark = pytest.mark.asyncio
 
@@ -43,9 +41,7 @@ class _BlobSpy:
         self.list_returns: list[dict[str, Any]] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        async def fake_list(
-            container_name: str, prefix: str, *, include_metadata: bool = True
-        ) -> list[dict[str, Any]]:
+        async def fake_list(container_name: str, prefix: str, *, include_metadata: bool = True) -> list[dict[str, Any]]:  # noqa: ARG001
             self.listed_prefixes.append((container_name, prefix))
             return self.list_returns
 
@@ -282,7 +278,7 @@ def test_build_sidecar_includes_iso_timestamp() -> None:
     reason = ValidationError(rule="V5", message="x", details={})
     text = _build_sidecar(DROP, reason, RUN_ID, CORR_ID).decode("utf-8")
     # Find the TIMESTAMP line; format is "TIMESTAMP:      <iso>"
-    ts_line = next(l for l in text.splitlines() if l.startswith("TIMESTAMP:"))
+    ts_line = next(line for line in text.splitlines() if line.startswith("TIMESTAMP:"))
     iso = ts_line.split(maxsplit=1)[1].strip()
     # Parseable as ISO 8601 (datetime.fromisoformat round-trip)
     from datetime import datetime

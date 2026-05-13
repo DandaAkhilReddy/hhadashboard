@@ -23,7 +23,6 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-
 from jobs.ventra_ingest.manifest import (
     KNOWN_FILE_NAMES,
     Manifest,
@@ -31,7 +30,6 @@ from jobs.ventra_ingest.manifest import (
 )
 from jobs.ventra_ingest.parsers import parse_file
 from jobs.ventra_ingest.validators import validate_ar_buckets_sum
-
 
 SAMPLE_ROOT = (
     Path(__file__).resolve().parents[2] / "samples" / "ventra" / "sample-drop-2026-06-15"

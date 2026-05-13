@@ -16,7 +16,6 @@ import hashlib
 from datetime import date
 
 import pytest
-
 from jobs.ventra_ingest.exceptions import ValidationError
 from jobs.ventra_ingest.manifest import (
     Manifest,
@@ -25,7 +24,6 @@ from jobs.ventra_ingest.manifest import (
     verify_manifest_checksums,
     verify_manifest_presence,
 )
-
 
 DROP = date(2026, 5, 15)
 
@@ -137,7 +135,7 @@ async def test_v2_passes_when_all_files_present(monkeypatch: pytest.MonkeyPatch)
         ]
     )
 
-    async def fake_list(container_name: str, prefix: str, *, include_metadata: bool = True) -> list[dict[str, object]]:
+    async def fake_list(container_name: str, prefix: str, *, include_metadata: bool = True) -> list[dict[str, object]]:  # noqa: ARG001
         assert prefix == "ventra/2026-05-15/"
         return [
             {"name": "ventra/2026-05-15/collections.csv", "size": 4, "last_modified": None, "metadata": {}},
@@ -157,7 +155,7 @@ async def test_v2_rejects_missing_file(monkeypatch: pytest.MonkeyPatch) -> None:
         ]
     )
 
-    async def fake_list(container_name: str, prefix: str, *, include_metadata: bool = True) -> list[dict[str, object]]:
+    async def fake_list(container_name: str, prefix: str, *, include_metadata: bool = True) -> list[dict[str, object]]:  # noqa: ARG001
         return [
             {"name": "ventra/2026-05-15/collections.csv", "size": 4, "last_modified": None, "metadata": {}},
         ]
@@ -179,7 +177,7 @@ async def test_v3_v4_pass_on_matching_sha_and_count(monkeypatch: pytest.MonkeyPa
     body = b"a,b\n1,2\n3,4\n"
     manifest = _manifest_for([("collections.csv", body, 2)])
 
-    async def fake_download(container_name: str, blob_name: str) -> bytes:
+    async def fake_download(container_name: str, blob_name: str) -> bytes:  # noqa: ARG001
         assert blob_name == "ventra/2026-05-15/collections.csv"
         return body
 
@@ -192,7 +190,7 @@ async def test_v3_v4_pass_on_matching_sha_and_count(monkeypatch: pytest.MonkeyPa
 async def test_v3_rejects_sha_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = _manifest_for([("collections.csv", b"original", 1)])
 
-    async def fake_download(container_name: str, blob_name: str) -> bytes:
+    async def fake_download(container_name: str, blob_name: str) -> bytes:  # noqa: ARG001
         return b"tampered"
 
     monkeypatch.setattr("jobs.ventra_ingest.manifest.blob.download_bytes", fake_download)
@@ -210,7 +208,7 @@ async def test_v4_rejects_row_count_mismatch(monkeypatch: pytest.MonkeyPatch) ->
         entries=[ManifestEntry(file_name="collections.csv", sha256=_sha(body), row_count=99)],
     )
 
-    async def fake_download(container_name: str, blob_name: str) -> bytes:
+    async def fake_download(container_name: str, blob_name: str) -> bytes:  # noqa: ARG001
         return body
 
     monkeypatch.setattr("jobs.ventra_ingest.manifest.blob.download_bytes", fake_download)

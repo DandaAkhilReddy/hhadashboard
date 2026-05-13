@@ -10,7 +10,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-
 from jobs.ventra_ingest.exceptions import ValidationError
 from jobs.ventra_ingest.parsers import (
     parse_ar_snapshot,
@@ -18,7 +17,6 @@ from jobs.ventra_ingest.parsers import (
     parse_file,
     parse_physician_monthly,
 )
-
 
 # =========================================================================
 # collections.csv — V5 (schema) + V10 (sanity)

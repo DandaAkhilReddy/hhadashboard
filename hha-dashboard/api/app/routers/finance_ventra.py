@@ -16,10 +16,10 @@ this router is intentionally read-only.
 from __future__ import annotations
 
 from datetime import date
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..deps import DBDep, require_role
 from ..models.entries_ventra import (
@@ -57,14 +57,16 @@ router = APIRouter(
 )
 async def list_daily_collections(
     db: DBDep,
-    date_from: date = Query(..., description="Inclusive lower bound on date."),
-    date_to: date = Query(..., description="Inclusive upper bound on date."),
-    facility_no: int | None = Query(
-        None, description="Optional facility filter; omit for all FL sites."
-    ),
-    limit: int = Query(
-        1000, ge=1, le=_MAX_ROWS, description="Max rows; capped at 5000."
-    ),
+    date_from: Annotated[date, Query(description="Inclusive lower bound on date.")],
+    date_to: Annotated[date, Query(description="Inclusive upper bound on date.")],
+    facility_no: Annotated[
+        int | None,
+        Query(description="Optional facility filter; omit for all FL sites."),
+    ] = None,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=_MAX_ROWS, description="Max rows; capped at 5000."),
+    ] = 1000,
 ) -> Envelope[CollectionsRowOut]:
     """Daily collections by (date, facility_no, payer_class) — read path
     for the Finance board's collections tile.
@@ -101,10 +103,11 @@ async def list_daily_collections(
 )
 async def list_ar_snapshot(
     db: DBDep,
-    snapshot_date: date = Query(..., description="Snapshot date to load."),
-    facility_no: int | None = Query(
-        None, description="Optional facility filter; omit for all FL sites."
-    ),
+    snapshot_date: Annotated[date, Query(description="Snapshot date to load.")],
+    facility_no: Annotated[
+        int | None,
+        Query(description="Optional facility filter; omit for all FL sites."),
+    ] = None,
 ) -> Envelope[ArSnapshotRowOut]:
     """AR aging snapshot by (snapshot_date, facility_no, aging_bucket).
 
@@ -134,18 +137,23 @@ async def list_ar_snapshot(
 )
 async def list_physician_monthly(
     db: DBDep,
-    month: date = Query(
-        ...,
-        description="First-of-month date. Sub-month days are silently truncated by the DB CHECK upstream.",
-    ),
-    facility_no: int | None = Query(
-        None, description="Optional facility filter; omit for all FL sites."
-    ),
-    npi: str | None = Query(
-        None,
-        description="Optional 10-digit NPI filter; omit for all physicians.",
-        pattern=r"^[0-9]{10}$",
-    ),
+    month: Annotated[
+        date,
+        Query(
+            description="First-of-month date. Sub-month days are silently truncated by the DB CHECK upstream."
+        ),
+    ],
+    facility_no: Annotated[
+        int | None,
+        Query(description="Optional facility filter; omit for all FL sites."),
+    ] = None,
+    npi: Annotated[
+        str | None,
+        Query(
+            description="Optional 10-digit NPI filter; omit for all physicians.",
+            pattern=r"^[0-9]{10}$",
+        ),
+    ] = None,
 ) -> Envelope[PhysicianMonthlyRowOut]:
     """Per-physician revenue / RVU for a single month.
 

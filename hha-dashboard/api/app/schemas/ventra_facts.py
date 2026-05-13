@@ -16,7 +16,6 @@ import uuid
 from datetime import date as date_t
 from datetime import datetime
 from decimal import Decimal
-from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -69,10 +68,7 @@ class PhysicianMonthlyRowOut(BaseModel):
     updated_at: datetime
 
 
-T = TypeVar("T", bound=BaseModel)
-
-
-class Envelope(BaseModel, Generic[T]):
+class Envelope[T: BaseModel](BaseModel):
     """Standard list-response envelope: count + rows.
 
     Future-proofs the response shape so adding cursor pagination or

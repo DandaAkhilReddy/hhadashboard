@@ -37,12 +37,6 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.deps import SessionLocal
-from app.services.audit import set_current_upn
 from jobs.ventra_ingest.ingest import IngestRun, ingest_drop
 from jobs.ventra_ingest.manifest import Manifest, ManifestEntry
 from jobs.ventra_ingest.parsers import (
@@ -50,7 +44,12 @@ from jobs.ventra_ingest.parsers import (
     CollectionsRow,
     PhysicianMonthlyRow,
 )
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.deps import SessionLocal
+from app.services.audit import set_current_upn
 
 pytestmark = pytest.mark.asyncio
 
