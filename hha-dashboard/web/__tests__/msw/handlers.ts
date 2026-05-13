@@ -14,8 +14,8 @@
 import type { paths } from "@/lib/api-types";
 import { http, HttpResponse } from "msw";
 
-type SitesResponse =
-  paths["/api/v1/operations/sites"]["get"]["responses"]["200"]["content"]["application/json"];
+type SitesTodayResponse =
+  paths["/api/v1/operations/sites-today"]["get"]["responses"]["200"]["content"]["application/json"];
 
 type HealthResponse = paths["/health"]["get"]["responses"]["200"]["content"]["application/json"];
 
@@ -30,5 +30,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
 export const handlers = [
   http.get(`${API_BASE}/health`, () => HttpResponse.json({ status: "ok" } as HealthResponse)),
 
-  http.get(`${API_BASE}/api/v1/operations/sites`, () => HttpResponse.json([] as SitesResponse)),
+  http.get(`${API_BASE}/api/v1/operations/sites-today`, () =>
+    HttpResponse.json([] as SitesTodayResponse),
+  ),
 ];
