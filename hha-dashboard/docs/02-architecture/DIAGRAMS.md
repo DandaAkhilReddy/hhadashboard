@@ -257,49 +257,62 @@ sequenceDiagram
 
 ---
 
-## 6. Ventra ingestion data flow
+## 6. Ventra ingestion data flow (Phase 1B, ADR-006 pre-aggregated)
 
-Phase 2. Ventra pushes daily CSVs via SFTP; we trigger an aggregation job on receipt.
+Ventra delivers three daily pre-aggregated CSVs; Event Grid + KEDA trigger one Container Apps Job replica per manifest. **Zero PHI on the wire by ADR-006** — the earlier "strip-on-parse" path is now contingency-only (see [INGESTION_VENTRA.md](../03-engineering/INGESTION_VENTRA.md) §Row-level fallback).
 
 ```mermaid
 flowchart LR
     classDef vendor fill:#999,stroke:#8a8a8a,color:#fff
     classDef azure fill:#0078d4,stroke:#005bbb,color:#fff
     classDef pg fill:#336791,stroke:#234c69,color:#fff
+    classDef alert fill:#dc2626,stroke:#7f1d1d,color:#fff
 
-    ventra["Ventra<br/>nightly cron<br/>(their side)"]:::vendor
+    ventra["Ventra (Snowflake)<br/>3 scheduled TASKs<br/>+ manifest TASK"]:::vendor
 
     subgraph azureRG ["Azure (HHA tenant)"]
-        sftp["Storage Account<br/>SFTP-enabled<br/>container: ventra-incoming"]:::azure
-        manifest["/_MANIFEST.csv<br/>(written last)"]:::azure
-        eg["Event Grid<br/>BlobCreated filter:<br/>_MANIFEST.csv only"]:::azure
-        job["Container Apps Job<br/>cj-hha-ventra-ingest<br/>Python 3.12"]:::azure
-        pg["Postgres<br/>facts.collections_daily<br/>facts.ar_snapshot<br/>facts.revenue_by_physician_mo"]:::pg
-        quarantine["Storage Account<br/>container: ventra-quarantine<br/>(failed parses)"]:::azure
-        audit["Postgres<br/>audit.audit_log<br/>ingest.run_log"]:::pg
+        sftp["vendor-storage<br/>HNS+SFTP<br/>container: vendor-inbound"]:::azure
+        eg["Event Grid System Topic<br/>filter: subjectEndsWith<br/>/_MANIFEST.csv"]:::azure
+        queue["Storage Queue<br/>q-ventra-manifests"]:::azure
+        job["Container Apps Job<br/>caj-ventra-ingest<br/>KEDA scaler, concurrency=1"]:::azure
+        pg["Postgres entries.*<br/>fact_collections_daily<br/>fact_ar_snapshot<br/>fact_revenue_by_physician_mo"]:::pg
+        ops["Postgres ops.*<br/>ingest_run<br/>processed_files"]:::pg
+        audit["Postgres audit.audit_log<br/>(triggers from migration 0007)"]:::pg
+        quarantine["vendor-storage<br/>container: vendor-quarantine<br/>+ _REJECT_REASON.txt"]:::azure
+        ai["App Insights<br/>ventra.* custom events"]:::azure
+        acs["ACS Email<br/>success/quarantine/<br/>failure/incident"]:::azure
+        dlq["vendor-storage<br/>container: vendor-deadletter<br/>(EG retries exhausted)"]:::alert
     end
 
-    ventra -->|"SSH key auth +<br/>IP allowlist"| sftp
-    sftp -->|"writes 10 CSVs<br/>per day"| sftp
-    sftp -.->|"BlobCreated event"| eg
-    eg -->|"only when _MANIFEST.csv lands"| job
+    ventra -->|"SFTP OR Snowflake<br/>external stage (SAS)"| sftp
+    sftp -.->|"BlobCreated"| eg
+    eg -->|"manifest only"| queue
+    queue -.->|"KEDA poll 30s"| job
 
-    job -->|"reads all CSVs<br/>for the date"| sftp
-    job -->|"STRIPS PHI + aggregates"| pg
-    job -->|"logs run status"| audit
-    job -.->|"on parse failure"| quarantine
-
-    sftp -.->|"lifecycle: cool@7d,<br/>delete@30d"| sftp
+    job -->|"V1-V4: load manifest + sha"| sftp
+    job -->|"V5-V11: per-file parse"| sftp
+    job -->|"V12: state='FL' lookup"| pg
+    job -->|"V13: SHA dedup"| ops
+    job -->|"V14: DB CHECK enforced<br/>pg_insert.on_conflict_do_update"| pg
+    job -->|"INSERT ops.processed_files"| ops
+    job -->|"audit triggers fire"| audit
+    job -.->|"any ValidationError<br/>(quarantine + sidecar)"| quarantine
+    job -.->|"V12 INCIDENT<br/>(ADR-005 violation)"| quarantine
+    job -->|"custom events<br/>via OTel logs bridge"| ai
+    job -->|"success / quarantine /<br/>failure / incident"| acs
+    eg -.->|"5 retries exhausted"| dlq
 ```
 
-**Key facts:**
+**Phase 1B key facts:**
 
-- **Manifest-triggered** — Event Grid only fires the job when `_MANIFEST.csv` lands, never on individual data files. This prevents picking up half-complete drops.
-- **PHI is stripped before any database write** (see diagram 7).
-- **Raw files have a 30-day Blob lifecycle** then auto-delete. We never persist raw rows in Postgres.
-- **Failed parses go to a quarantine container** for investigation.
+- **Manifest-last contract** — Ventra writes `_MANIFEST.csv` AFTER all data files. Event Grid filter `subjectEndsWith '/_MANIFEST.csv'` means partial drops never trigger.
+- **Channel-agnostic delivery** — SFTP (local user + SSH key) OR Snowflake-direct (external stage + SAS token) both land in the same `vendor-inbound/ventra/YYYY-MM-DD/` path. Downstream code is identical.
+- **All-or-nothing per drop** — `ingest_drop()` wraps the 3 fact-table upserts + `ops.processed_files` inserts in a single `async with db.begin():`. Mid-write `IntegrityError` rolls back everything.
+- **`source_system` + `state` write-locked** — DB DEFAULTs + CHECK constraints ensure every fact-table row is `('VENTRA_FL_ATHENA', 'FL')`. Even raw SQL bypassing the ORM cannot inject TX rows (verified by C17 integration test).
+- **Quarantine on every V1-V13 failure** — copy original blobs to `vendor-quarantine/ventra/YYYY-MM-DD/` + `_REJECT_REASON.txt` sidecar. Inbound files persist 90 days for operator replay.
+- **Retry semantics by exit code** — handled paths (success / quarantine / incident / dedup_skip) DELETE the queue message; unhandled exceptions don't, letting KEDA retry per `replicaRetryLimit=3` before Event Grid dead-letters.
 
-Full architecture in [INGESTION_VENTRA.md](../03-engineering/INGESTION_VENTRA.md).
+Full implementation in [INGESTION_VENTRA.md](../03-engineering/INGESTION_VENTRA.md). Architectural decision: [ADR-006](adr/006-ventra-pre-aggregated-feed.md).
 
 ---
 

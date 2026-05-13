@@ -25,6 +25,7 @@ from .routers import (
     clinical,
     entries,
     finance,
+    finance_ventra,
     operations,
     people,
     scorecards,
@@ -352,6 +353,7 @@ _CACHED_ALEMBIC_HEAD: str | None = None
 app.include_router(sites.router)
 app.include_router(operations.router)
 app.include_router(finance.router)
+app.include_router(finance_ventra.router)
 app.include_router(clinical.router)
 app.include_router(people.router)
 app.include_router(scorecards.router)

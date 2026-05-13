@@ -10,14 +10,14 @@ name: build-job-images
 #   gh workflow run build-job-images.yml -f environment=dev
 #   gh workflow run build-job-images.yml -f environment=prod -f image_tag=v1.2.3
 #
-# What gets built (3 of 6 jobs):
-#   - pg_backup     → acrhha{env}.azurecr.io/pg-backup:<tag>
-#   - alert_digest  → acrhha{env}.azurecr.io/alert-digest:<tag>
-#   - cred_scan     → acrhha{env}.azurecr.io/cred-scan:<tag>
+# What gets built (4 of 6 jobs):
+#   - pg_backup       → acrhha{env}.azurecr.io/pg-backup:<tag>
+#   - alert_digest    → acrhha{env}.azurecr.io/alert-digest:<tag>
+#   - cred_scan       → acrhha{env}.azurecr.io/cred-scan:<tag>
+#   - ventra_ingest   → acrhha{env}.azurecr.io/ventra-ingest:<tag>
 #
 # Skipped (vendor-blocked or scaffolding):
 #   - paycom_sync    (waiting on Paycom API access — F1)
-#   - ventra_ingest  (waiting on Ventra BAA + data shape — F1)
 #   - upload_ingest  (PARTIAL; pdf_extract.py SDK overload bug T8 first)
 #
 # Auth: OIDC federated identity. Same app reg as deploy-{dev,prod}.yml;
@@ -131,6 +131,21 @@ jobs:
           docker push "$ACR_LOGIN_SERVER/cred-scan:${{ steps.tag.outputs.tag }}"
           docker push "$ACR_LOGIN_SERVER/cred-scan:latest"
 
+      - name: Build & push ventra_ingest
+        # Build context is hha-dashboard/ (the Dockerfile COPYs both api/
+        # and jobs/ since the job imports app.services.blob, app.deps, etc.
+        # for the shared infrastructure). The other 3 jobs are self-
+        # contained at their own directory; ventra_ingest is not.
+        working-directory: hha-dashboard
+        run: |
+          docker build \
+            -f jobs/ventra_ingest/Dockerfile \
+            -t "$ACR_LOGIN_SERVER/ventra-ingest:${{ steps.tag.outputs.tag }}" \
+            -t "$ACR_LOGIN_SERVER/ventra-ingest:latest" \
+            .
+          docker push "$ACR_LOGIN_SERVER/ventra-ingest:${{ steps.tag.outputs.tag }}"
+          docker push "$ACR_LOGIN_SERVER/ventra-ingest:latest"
+
       - name: Print pushed image references
         run: |
           tag='${{ steps.tag.outputs.tag }}'
@@ -138,14 +153,17 @@ jobs:
           echo "  $ACR_LOGIN_SERVER/pg-backup:$tag"
           echo "  $ACR_LOGIN_SERVER/alert-digest:$tag"
           echo "  $ACR_LOGIN_SERVER/cred-scan:$tag"
+          echo "  $ACR_LOGIN_SERVER/ventra-ingest:$tag"
           echo
           echo "Next: bump image_tag in infra/env/${{ inputs.environment }}.bicepparam,"
           echo "      then trigger the matching deploy-${{ inputs.environment }}.yml workflow."
+          echo "Or for a fast image-only swap on ventra-ingest:"
+          echo "  gh workflow run deploy-ventra-ingest.yml -f environment=${{ inputs.environment }} -f image_tag=$tag"
 
       - name: Verify images appear in ACR
         run: |
           # Cheap post-flight: confirm each repo got the new tag.
-          for image in pg-backup alert-digest cred-scan; do
+          for image in pg-backup alert-digest cred-scan ventra-ingest; do
             tags=$(az acr repository show-tags -n "$ACR_NAME" --repository "$image" -o tsv || echo "")
             if echo "$tags" | grep -qx '${{ steps.tag.outputs.tag }}'; then
               echo "::notice::$image:${{ steps.tag.outputs.tag }} present in $ACR_NAME"

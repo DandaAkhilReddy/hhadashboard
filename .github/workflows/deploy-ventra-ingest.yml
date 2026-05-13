@@ -1,0 +1,153 @@
+name: deploy-ventra-ingest
+
+# Swap the container image on caj-ventra-ingest-{env} without a full
+# Bicep redeploy. Used for fast iteration during the Ventra build-out
+# AND for rolling out a hotfix once Phase 1B is in prod.
+#
+# Build the image first with `build-job-images.yml`, then run this with
+# the same image_tag to point the Container Apps Job at it.
+#
+# This workflow does NOT update the Bicep ventra_ingest_image parameter
+# in env/<env>.bicepparam — the next full Bicep deploy will revert to
+# whatever's pinned there. That's by design: this is for testing /
+# emergency rollback; production releases pin the tag via Bicep and run
+# the normal deploy-{dev,prod}.yml.
+#
+# Auth: OIDC federated identity (same app reg as the build workflow).
+# The SP needs the "Container Apps Contributor" role assignment on the
+# job (or the broader resource group). Granted by rbac.bicep when
+# enable_container_jobs + enable_rbac are both true.
+#
+# Repository variables required:
+#   AZURE_CLIENT_ID         — federated credential's app id
+#   AZURE_TENANT_ID         — HHA's M365 tenant id
+#   AZURE_SUBSCRIPTION_ID   — hha-{env} subscription id
+#   AZURE_RG_<ENV>          — resource group name (rg-hha-dashboard-{env})
+#                             read as AZURE_RG_DEV / AZURE_RG_PROD via the
+#                             vars context below
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+      image_tag:
+        description: 'Image tag (must already exist in acrhha{env}.azurecr.io/ventra-ingest)'
+        required: true
+        type: string
+      confirm:
+        description: 'For prod only — type "deploy-ventra-ingest" to confirm'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  # Per-environment lock so two concurrent swaps don't race the Container
+  # Apps Job control plane.
+  group: deploy-ventra-ingest-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  swap-image:
+    name: swap ventra-ingest image (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      # Gates OIDC subject + (in prod) required-reviewer approval.
+      name: ${{ inputs.environment }}
+
+    env:
+      ACR_NAME: acrhha${{ inputs.environment }}
+      ACR_LOGIN_SERVER: acrhha${{ inputs.environment }}.azurecr.io
+      JOB_NAME: caj-ventra-ingest-${{ inputs.environment }}
+
+    steps:
+      - name: Prod safety gate
+        if: inputs.environment == 'prod' && inputs.confirm != 'deploy-ventra-ingest'
+        run: |
+          echo "::error::Prod swaps require confirm='deploy-ventra-ingest'."
+          echo "::error::Did you really mean to point production at image_tag='${{ inputs.image_tag }}'?"
+          exit 1
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve resource group
+        id: rg
+        run: |
+          # Per-env repo variable. Set via:
+          #   gh variable set AZURE_RG_DEV --body 'rg-hha-dashboard-dev'
+          if [[ '${{ inputs.environment }}' == 'prod' ]]; then
+            rg='${{ vars.AZURE_RG_PROD }}'
+          else
+            rg='${{ vars.AZURE_RG_DEV }}'
+          fi
+          if [[ -z "$rg" ]]; then
+            echo "::error::AZURE_RG_${{ inputs.environment }} repo variable is empty"
+            exit 1
+          fi
+          echo "rg=$rg" >> "$GITHUB_OUTPUT"
+          echo "::notice::Resource group: $rg"
+
+      - name: Verify image exists in ACR
+        run: |
+          # Fail fast if the operator typo'd the tag or forgot to build first.
+          tags=$(az acr repository show-tags -n "$ACR_NAME" --repository ventra-ingest -o tsv 2>/dev/null || echo "")
+          if ! echo "$tags" | grep -qx '${{ inputs.image_tag }}'; then
+            echo "::error::tag '${{ inputs.image_tag }}' not found in $ACR_LOGIN_SERVER/ventra-ingest"
+            echo "::error::available tags:"
+            echo "$tags" | sed 's/^/  /'
+            echo "::error::Run build-job-images.yml first."
+            exit 1
+          fi
+          echo "::notice::Confirmed $ACR_LOGIN_SERVER/ventra-ingest:${{ inputs.image_tag }} exists."
+
+      - name: Verify Container Apps Job exists
+        run: |
+          if ! az containerapp job show \
+            --name "$JOB_NAME" \
+            --resource-group '${{ steps.rg.outputs.rg }}' \
+            --query name -o tsv >/dev/null 2>&1; then
+            echo "::error::job $JOB_NAME not found in ${{ steps.rg.outputs.rg }}"
+            echo "::error::Has the Bicep deploy been run with enable_ventra_ingest_job=true?"
+            exit 1
+          fi
+
+      - name: Swap image
+        run: |
+          new_image="$ACR_LOGIN_SERVER/ventra-ingest:${{ inputs.image_tag }}"
+          echo "::notice::Pointing $JOB_NAME at $new_image"
+          az containerapp job update \
+            --name "$JOB_NAME" \
+            --resource-group '${{ steps.rg.outputs.rg }}' \
+            --image "$new_image" \
+            --output none
+
+      - name: Confirm new image is wired
+        run: |
+          current=$(az containerapp job show \
+            --name "$JOB_NAME" \
+            --resource-group '${{ steps.rg.outputs.rg }}' \
+            --query 'properties.template.containers[0].image' -o tsv)
+          expected="$ACR_LOGIN_SERVER/ventra-ingest:${{ inputs.image_tag }}"
+          if [[ "$current" != "$expected" ]]; then
+            echo "::error::post-swap image is '$current', expected '$expected'"
+            exit 1
+          fi
+          echo "::notice::$JOB_NAME now running $current"
+          echo "::notice::To smoke-test: drop a sample manifest into vendor-inbound; watch:"
+          echo "  az containerapp job execution list --name $JOB_NAME --resource-group ${{ steps.rg.outputs.rg }}"

@@ -2,9 +2,12 @@
 
 **Prepared by:** HHA Medicine IT
 **Author:** Akhil Reddy, IT Director · areddy@hhamedicine.com
-**Date:** 2026-05-04
+**Date:** 2026-05-04 (initial); 2026-05-11 (sent to Ventra as Option A proposal via [FOLLOWUP_EMAIL.md](FOLLOWUP_EMAIL.md))
 **For:** Ventra Health — David Reck, Suma Bhat, Darshan Patel, Client Success
 **Companion to:** the 30-minute review meeting on 2026-05-05
+**Architectural decision:** [ADR-006 — Pre-Aggregated Ventra Feed](../../02-architecture/adr/006-ventra-pre-aggregated-feed.md) (Proposed)
+
+> **Status (2026-05-11):** The pre-aggregated Option A proposal in this document was sent to Ventra. HHA's build proceeds on this shape. Bicep `enable_sftp` toggles in prod stay **off** until Ventra confirms in writing and sends their public SSH key. If Ventra refuses pre-aggregated, ADR-006 fallback (Option B row-level with PHI strip on receipt) activates — adds ~3 weeks of PHI-safety hardening work.
 
 ---
 

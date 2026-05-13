@@ -457,6 +457,129 @@ For existing CRLF-corrupted files: `dos2unix <file>` then re-stage.
 
 ---
 
+## Ventra ingest — validation failures (V1–V14)
+
+When the ACS quarantine email lands, the `RULE` field in `_REJECT_REASON.txt` tells you which validator fired. This catalog maps every rule to its likely cause + remediation. The orchestrator routes V12 to the incident path; everything else is quarantine.
+
+### V1 — Manifest parse failure
+
+**Sidecar message variants:** `manifest is empty`, `manifest is missing required columns`, `malformed sha256`, `unknown file_name`, `duplicate file_name entries`.
+
+**Most likely cause:** Ventra changed `_MANIFEST.csv` schema (added a column, renamed `sha256` → `checksum`, etc.) without notice. The schema-evolution policy in ADR-006 requires 7-day notice for column adds.
+
+**Remediation:** ask Ventra to revert the manifest format change, or coordinate the schema update on HHA's side (update `KNOWN_FILE_NAMES` / `MANIFEST_REQUIRED_COLUMNS` in `jobs/ventra_ingest/manifest.py`, ship a follow-up commit, regenerate sample fixture).
+
+### V2 — Manifest references files not present in drop folder
+
+**Sidecar message:** `manifest references files not present in drop folder; missing: [foo.csv]`.
+
+**Most likely cause:** Race condition on Ventra's side — they wrote `_MANIFEST.csv` before all data files had landed. The Event Grid filter `subjectEndsWith '/_MANIFEST.csv'` is designed to prevent this but Ventra's writer order is the source of truth.
+
+**Remediation:** ping Ventra to confirm their manifest-last contract is still in place. The sidecar's `missing` list tells you exactly which file failed to upload. Re-ingest via the retry-folder pattern after Ventra reuploads.
+
+### V3 — SHA-256 mismatch
+
+**Sidecar message:** `sha256 mismatch on <filename>; expected_sha256=..., actual_sha256=...`.
+
+**Most likely cause:** Either (a) Ventra modified the file after computing the manifest digest (race condition between hash calc + upload), or (b) blob storage corruption mid-write (rare, but possible during a regional brownout).
+
+**Remediation:** ask Ventra to re-upload that specific file. If it happens twice on the same file, file an Azure Storage support ticket.
+
+### V4 — Row count mismatch
+
+**Sidecar message:** `row_count mismatch on <filename>; expected_row_count=X, actual_row_count=Y`.
+
+**Most likely cause:** Vendor truncated a file mid-write or sent a partial export. Less likely: line-ending change (CR vs CRLF) inflated/deflated the count.
+
+**Remediation:** check the file with `wc -l` after download. If Vendra had a known incident on the source side, they should resend the affected day.
+
+### V5 — Schema match failure
+
+**Sidecar message:** `<filename> line N failed V5; errors=[...]`.
+
+**Most likely cause:** Ventra added a new column we don't accept (the parsers use `extra='forbid'`), OR a column type changed (e.g. `payments_received` stopped being decimal), OR a new `payer_class` value appeared outside the `Literal[...]` enum.
+
+**Remediation:** check the `errors` list in the sidecar. If a new value is genuinely needed (e.g. Ventra adds an `unknown` payer_class), update the parser's `Literal` types + add a migration if needed, then regenerate the sample fixture.
+
+### V6 — Drop date drift
+
+**Sidecar message:** `<filename> line N date=X does not match drop_date=Y`.
+
+**Most likely cause:** Ventra's job pulled data from the wrong day (timezone bug, late-running batch picking up the next day's window).
+
+**Remediation:** ask Ventra to confirm the timezone of their aggregation job. Per ADR-006 op rule #1, the `date` / `snapshot_date` columns should match the folder name exactly.
+
+### V7 — physician_monthly.month is not first-of-month
+
+**Sidecar message:** `V7: month=YYYY-MM-DD is not the first day of its month`.
+
+**Most likely cause:** Ventra emitted a month-close drop with `month=2026-05-31` instead of `2026-05-01`. The DB CHECK constraint `month = date_trunc('month', month)::date` would catch this even if V7 didn't, but V7 surfaces the friendlier error.
+
+**Remediation:** ask Ventra to standardize on first-of-month. No code change on HHA side.
+
+### V8 — Unknown facility_no
+
+**Sidecar message:** `unknown facility_no=N in <filename> line M (not present in masters.sites)`.
+
+**Most likely cause:** Either (a) Ventra added a new site HHA doesn't know about (legitimate new contract), or (b) Ventra used their internal facility IDs instead of HHA's `masters.sites.id` (the v1 mapping per ADR-006).
+
+**Remediation (case a):** verify with HHA exec leadership that the new site is legit. If yes, run `INSERT INTO masters.sites (name, state, status) VALUES (...)` and replay the drop.
+**Remediation (case b):** schedule the migration to add `masters.sites.ventra_facility_no` column + update V12 to join through it. Until that ships, ask Ventra to use HHA's IDs.
+
+### V9 — AR bucket duplicate
+
+**Sidecar message:** `ar_snapshot.csv line N duplicates (snapshot_date=X, facility_no=Y, aging_bucket=Z)`.
+
+**Most likely cause:** Ventra's aggregation job emitted two rows for the same (date, facility, bucket) triple — likely a GROUP BY missing a column on their side.
+
+**Remediation:** flag to Ventra. The right behavior is one row per bucket per facility per snapshot.
+
+### V10 — Collections sanity violation
+
+**Sidecar message:** `V10: payments_received=X exceeds gross_charges + write_offs (Y + Z = N)`.
+
+**Most likely cause:** Same-day net cash exceeded same-day gross-billed-minus-writeoffs. Usually a posting bug (duplicate payment) or a write-off booked against a different day's charges.
+
+**Remediation:** Ventra reconciles. Often resolves on next-day delivery after their posting catches up.
+
+### V11 — Bad NPI
+
+**Sidecar message:** `physician_monthly.csv line N failed V5` with error pointing at `physician_npi`.
+
+**Most likely cause:** A physician record on Ventra's side has a non-10-digit NPI (e.g. trailing whitespace, missing leading zero on an older ID, dash characters).
+
+**Remediation:** Ventra cleans the NPI in their physician master. The DB CHECK `~ '^[0-9]{10}$'` will also reject downstream, so don't try to relax V11 in code.
+
+### V12 — ADR-005 violation (non-FL facility) — **INCIDENT**
+
+**Sidecar message:** `non-FL facility in Ventra drop: <filename> line N facility_no=X hha_state=TX`.
+
+This is the **CRITICAL** path. Per [SECURITY_INCIDENT_PLAYBOOK.md](SECURITY_INCIDENT_PLAYBOOK.md), V12 firing means HHA's contractual FL-only invariant was violated. The drop is quarantined; no data was written.
+
+**Immediate actions (within 1 business day):**
+
+1. Email Ventra **leadership** (Gilda + David Reck + Suma Bhat) — request immediate source-side filter audit.
+2. Do NOT replay until Ventra confirms the filter is fixed AND HHA Compliance reviews the incident.
+3. Document the incident in `docs/04-operations/SECURITY_INCIDENT_PLAYBOOK.md` ticket log.
+
+**Code-side note:** the V12 check is `state == 'FL'` against `masters.sites`. If you've extended HHA's contract to include TX sites (via ADR amendment), this needs more than a code patch — it needs a new ADR superseding ADR-005.
+
+### V13 — Dedup conflict
+
+**Sidecar message:** `N file(s) re-sent with changed content for drop_date=...; manual review required`.
+
+**Most likely cause:** Ventra restated a prior day's data without coordinating. Either a legitimate correction after a posting fix, or a vendor bug re-emitting an already-shipped file with different content.
+
+**Remediation:** confirm with Ventra why the file changed. If it's a legitimate restate, run the replay procedure (`<drop_date>-retry-1` folder). If it's a vendor bug, ask for the original to be re-emitted unchanged.
+
+**Note:** V13 also handles the success-path "identical re-delivery" case — same SHA, no error, just a `ventra.dedup_skip` event. That doesn't trigger an email; quarantine only fires on the conflict variant.
+
+### V14 — DB CHECK violation *(should never reach an operator)*
+
+V14 is enforced exclusively at the DB layer by the `source_system_locked` + `state_fl_only` CHECK constraints on every fact table. The writer omits both columns from upsert values, so the server defaults kick in. If V14 ever surfaces in App Insights as a `ventra.ingest_failed` (not quarantine), it indicates a code bug bypassing the writer — file an incident.
+
+---
+
 ## Recovery / disaster
 
 For full disaster scenarios (data loss, regional outage, suspected breach), see [SECURITY_INCIDENT_PLAYBOOK.md](SECURITY_INCIDENT_PLAYBOOK.md) and [RUNBOOK.md](RUNBOOK.md) § Backup & restore.

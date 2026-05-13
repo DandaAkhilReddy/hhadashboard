@@ -648,48 +648,82 @@ Container App Job: paycom-sync               Postgres
 
 Jobs are idempotent — re-running the same date range overwrites same rows.
 
-### 5.5 Ventra FL nightly ingest *(P2+, the PHI firewall)*
+### 5.5 Ventra FL ingest *(Phase 1B, event-driven per ADR-006)*
+
+**ADR-006 locked the delivery shape as pre-aggregated.** Ventra writes three daily CSVs (already rolled up to (date, facility, payer_class) / (snapshot_date, facility, aging_bucket) / (month, physician_npi, facility)) — zero PHI on the wire, zero PHI in HHA's process. The earlier "PHI firewall at parser" design (kept in the row-level fallback branch of [INGESTION_VENTRA.md](../03-engineering/INGESTION_VENTRA.md)) is contingency-only, activated if Ventra refuses pre-aggregated in writing.
 
 ```
-Container App Job: ventra-ingest            Blob Storage          Postgres
-         │                                       │                    │
-         │ 1. List new files in container        │                    │
-         │    ventra-raw-drops/                  │                    │
-         │    (put there by Ventra SFTP or       │                    │
-         │     manual upload)                    │                    │
-         ├──────────────────────────────────────▶│                    │
-         │                                       │                    │
-         │ 2. Download file (CSV or 835)         │                    │
-         ◀──────────────────────────────────────┤                    │
-         │                                       │                    │
-         │ 3. THE FIREWALL:                      │                    │
-         │    for each raw row:                  │                    │
-         │      strip forbidden fields           │                    │
-         │      audit the strip event            │                    │
-         │    aggregate in memory:               │                    │
-         │      by (date, 'FL')                  │                    │
-         │        → fact_collections_daily       │                    │
-         │      by (snapshot_date, 'FL', bucket) │                    │
-         │        → fact_ar_snapshot             │                    │
-         │      by (month, physician_id)         │                    │
-         │        → fact_revenue_by_physician_mo │                    │
-         │                                       │                    │
-         │    (raw rows never touch Postgres)    │                    │
-         │                                       │                    │
-         │ 4. Bulk INSERT aggregates with        │                    │
-         │    source_system='VENTRA_FL_ATHENA'   │                    │
-         ├────────────────────────────────────────────────────────────▶│
-         │                                       │                    │
-         │ 5. Mark file as processed in the      │                    │
-         │    manifest; original stays in Blob   │                    │
-         │    where 30-day lifecycle policy      │                    │
-         │    will auto-delete                   │                    │
-         ├──────────────────────────────────────▶│                    │
-         │                                       │                    │
-         │ 6. exit 0                             │                    │
+Ventra (Snowflake)                                     vendor-inbound
+                                                       (HNS+SFTP storage)
+       │                                                       │
+       │ 1. Three daily Snowflake TASKs run aggregate          │
+       │    queries against existing client-reporting models   │
+       │    + a 4th TASK writes _MANIFEST.csv LAST             │
+       │                                                       │
+       │    Delivery channel: SFTP OR Snowflake-direct         │
+       │    (external stage with HHA-provided SAS token)       │
+       │    — architecture is channel-agnostic                 │
+       │                                                       │
+       ├──────────────────────────────────────────────────────▶│
+       │    vendor-inbound/ventra/YYYY-MM-DD/                  │
+       │      collections.csv                                  │
+       │      ar_snapshot.csv                                  │
+       │      physician_monthly.csv  (only on month-close)     │
+       │      _MANIFEST.csv          ← Event Grid trigger      │
+       │                                                       │
+                                                               │
+                                                       Event Grid System Topic
+                                                       (subjectEndsWith
+                                                        '/_MANIFEST.csv')
+                                                               │
+                                                               ▼
+                                                       Storage Queue
+                                                       q-ventra-manifests
+                                                               │
+                                                       KEDA azure-queue scaler
+                                                       (queueLength=1, concurrency=1)
+                                                               │
+                                                               ▼
+                                                       Container Apps Job
+                                                       caj-ventra-ingest
+                                                               │
+                                                               │  Validators V1-V14:
+                                                               │
+                                                               │  V1-V4   manifest parse + presence + sha + row_count
+                                                               │  V5-V11  per-file Pydantic + V7/V10/V11 row checks
+                                                               │  V6      date matches drop_date folder name
+                                                               │  V8      facility_no in masters.sites
+                                                               │  V9      AR bucket uniqueness
+                                                               │  V12     state='FL' (ADR-005 — incident if violated)
+                                                               │  V13     ops.processed_files SHA dedup
+                                                               │  V14     source_system DB CHECK locked
+                                                               │
+                                                               │  Single async-with-db.begin() upsert:
+                                                               │  pg_insert(...).on_conflict_do_update(...)
+                                                               │  per fact table + ops.processed_files
+                                                               ▼
+                                                       Postgres
+                                                       ├─ entries.fact_collections_daily
+                                                       ├─ entries.fact_ar_snapshot
+                                                       ├─ entries.fact_revenue_by_physician_mo
+                                                       ├─ ops.ingest_run
+                                                       └─ ops.processed_files
+
+Failure paths (per Phase 1A.A5 of plan):
+  ADRViolation (V12)  → copy to vendor-quarantine + _REJECT_REASON.txt
+                        + ventra.adr005_violation event + incident email
+  ValidationError     → same quarantine flow + ventra.validation_failed
+                        event + quarantine email (V1-V11, V13)
+  Unhandled Exception → no quarantine; do NOT delete queue message;
+                        let KEDA retry up to replicaRetryLimit=3, then
+                        Event Grid dead-letters to vendor-deadletter
 ```
 
-**Zero Tier-C data persisted.** The raw file's `claim_id`, `dos`, `cpt_per_line`, `patient_*` fields exist only in memory inside the job, for the duration of aggregation, and are then garbage-collected. The raw file itself on Blob auto-shreds at 30 days.
+**Zero Tier-C data persisted, zero on the wire.** Every column Ventra delivers is Tier-A by contract (ADR-006 + ADR-001 firewall). The CI test `tests/test_schema_classification.py` rejects any migration that adds a forbidden column name to the fact tables. Vendor's `source_system` tag (CB/MGS/VSQL/DUVA) is captured in the `ventra.ingest_complete` App Insights event for forensic reconciliation; never persisted.
+
+**RBAC on the read side:** the dashboard tiles consume the data via `/api/v1/finance/{daily-collections,ar-snapshot,physician-monthly}` (router: `app/routers/finance_ventra.py`), gated to `owner_finance`/`admin`/`exec` per ADR-002. The frontend never touches `entries.fact_*` directly.
+
+**Quarantine retention:** 90 days on vendor-quarantine, 90 days on vendor-inbound (lifecycle policy from `infra/modules/vendor_storage.bicep`). The reject sidecar carries `run_id`, `correlation_id`, `rule`, and the rule's `details` payload — operators triage from there.
 
 ### 5.6 Daily email digest (7 AM ET)
 

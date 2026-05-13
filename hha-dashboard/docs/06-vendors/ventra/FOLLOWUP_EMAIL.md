@@ -1,8 +1,29 @@
 # Ventra follow-up email — Option A (pre-aggregated CSVs)
 
-**Status:** DRAFT — review before sending
-**To:** Gilda Romero `<gilda.romero@ventrahealth.com>`, Stephanie [last name TBC] `<stephanie@ventrahealth.com>`
-**From:** Akhil Reddy, IT Director, HHA Medicine
+**Status:** READY TO SEND — body finalized 2026-05-11; paste into Outlook and update timestamp in the after-sending checklist once sent
+
+**Recipient strategy:** broad visibility — full Ventra team + HHA exec sponsors. Pulled from Akhil's Outlook contacts; exact addresses to be captured at send time in the after-sending checklist.
+
+**To (Ventra primary, Gilda's reply thread):**
+- Gilda Romero — `gilda.romero@ventrahealth.com`
+- Stephanie [last name + email TBC from Gilda's 2026-05-08 reply]
+
+**Cc (Ventra extended — May 5 meeting attendees):**
+- David Reck
+- Suma Bhat
+- Darshan Patel
+- Plus anyone else from Ventra Client Success who was on the May 5 call
+
+**Cc (HHA stakeholders):**
+- HHA CEO (sponsor)
+- HHA CFO (co-sponsor — finance dashboard is the use case)
+- Crystal (operations — relays to Ventra on day-to-day matters)
+- Sandy (manual finance entry counterpart)
+
+**Bcc:**
+- Akhil's personal email (thread backup if HHA email lapses; operational safety per the plan)
+
+**From:** Akhil Reddy, IT Director, HHA Medicine — `areddy@hhamedicine.com`
 **Subject:** Re: Standard Data Extract — proposal for the data shape that fits HHA's architecture
 **Drafted:** 2026-05-11
 **Context:** Reply to Gilda's 2026-05-08 message attaching the *Standard Data Extract — Files Specifications* spec. Asks Ventra to deliver three pre-aggregated CSVs (collections, AR snapshot, per-physician monthly) instead of the claim-level extract — keeps PHI off the wire and out of HHA's database, and aligns with the ADR-001 HIPAA firewall.
@@ -159,8 +180,23 @@ If a phased delivery is easier — for example, Files 1 and 2 in the first
 release and File 3 a month later — that works well on our side too. We
 build the dashboard tiles in waves.
 
-Happy to send a calendar invite for the week of May 18 when you confirm a
-window.
+Happy to send a calendar invite for the week of May 18 or May 25,
+whichever fits your team's return — no rush from our side.
+
+One quick note on the mechanics, since I understand Ventra runs on
+Snowflake: the three outputs above line up cleanly with the standard
+Snowflake export pattern — three scheduled tasks running aggregate
+queries against your existing client-reporting models, with COPY INTO
+writing the CSVs to cloud storage. No new aggregation logic on your
+side, just a new export target.
+
+A note on the delivery channel: SFTP works well for HHA and is what
+the spec above assumes, but if a Snowflake external stage writing
+directly to Azure Blob is easier on your side, that works equally
+well for us. We can provide a write-scoped SAS token for a dedicated
+container, or a private link if your security team prefers that.
+Happy to let your engineering lead pick the path of least resistance
+in the follow-up working session.
 
 Thank you again for the time on the 5th, and for the spec.
 
@@ -176,10 +212,20 @@ areddy@hhamedicine.com
 
 ## After sending — checklist
 
-- [ ] Sent on `__________` (fill in and commit when sent)
-- [ ] Calendar invite for follow-up session sent to: __________
-- [ ] Ventra confirmation logged in `VENTRA_QUESTIONS.md` decision tracker
-- [ ] Any field-list changes from the call land in `VENTRA_DATA_REQUIREMENTS.md` § 3 (with commit reference)
+- [x] **Sent on `2026-05-11`** (Akhil confirmed via Outlook compose screenshot)
+- [x] **Recipients as sent** (final list — replaces draft "Recipient strategy" header above):
+  - **To:** Gilda Romero, Stephanie Marx
+  - **Cc — Ventra:** Mary Kimberlin, Darshan Patel `<darshan.patel@ventrahealth.com>`
+  - **Cc — HHA:** Dinesh Reddy Kandari, Kristofer Felton, Vishnu Reddy, Sandy Collins, Joey Armas, Maribel Reyes
+  - **Notable omission:** David Reck + Suma Bhat (May 5 meeting attendees) NOT included. Add to nudge thread if no reply by 2026-05-19.
+- [x] **Calendar invite window offered:** this week May 13-15 (Akhil's choice — tighter than the suggested May 18/25 window)
+- [ ] Calendar invite for follow-up session sent to: __________ (pending Ventra's reply confirming a slot)
+- [ ] Ventra confirmation of pre-aggregated shape logged in `VENTRA_QUESTIONS.md` decision tracker
+- [ ] Net-revenue formula written confirmation logged in `DATA_REQUIREMENTS.md` § 3.1
+- [ ] Delivery channel choice (SFTP vs Snowflake-direct) captured in `DATA_REQUIREMENTS.md`
+- [ ] Any field-list changes from the working session land in `DATA_REQUIREMENTS.md` § 3 (with commit reference)
+
+**Next nudge date:** 2026-05-19 (Monday) — if Ventra hasn't replied by EOD this date, send a polite follow-up adding David Reck + Suma Bhat to the thread.
 
 ## Anticipated responses + how to handle
 

@@ -117,6 +117,46 @@ param storage_sku string = 'Standard_LRS'
 @maxValue(365)
 param storage_soft_delete_retention_days int = 7
 
+@description('Enable vendor-inbound Storage Account (Ventra ingest pipeline per ADR-006). Separate from the main storage account because HNS + SFTP are create-time-only properties. Containers: vendor-inbound, vendor-quarantine, vendor-deadletter.')
+param enable_vendor_storage bool = false
+
+@description('Vendor-storage account name. Convention: sthhavendor{env} (lowercase, alphanumeric, globally unique). Default composes from env.')
+param vendor_storage_account_name string = 'sthhavendor${env_name}${uniqueString(resourceGroup().id)}'
+
+@description('Vendor-storage SKU. Standard_LRS for dev, Standard_ZRS for prod (zone-redundant since vendor drops cannot be replayed if lost).')
+@allowed(['Standard_LRS', 'Standard_GRS', 'Standard_RAGRS', 'Standard_ZRS'])
+param vendor_storage_sku string = 'Standard_LRS'
+
+@description('Days after which vendor-inbound + vendor-quarantine blobs are auto-deleted. 90 = HIPAA audit retention window.')
+@minValue(0)
+@maxValue(365)
+param vendor_storage_lifecycle_delete_days int = 90
+
+@description('Enable SFTP service on the vendor-storage account. Adds ~$220/mo. Leave false if Ventra picks Snowflake-direct (SAS-token external stage) instead. Toggled per the architecture A3 decision.')
+param enable_sftp bool = false
+
+@secure()
+@description('Ventra SFTP public SSH key (full OpenSSH-format public key content). Only consumed when enable_sftp is true. Rotated quarterly via Key Vault.')
+param ventra_sftp_public_key string = ''
+
+@description('Enable Event Grid system topic + manifest subscription + Storage Queue on the vendor-storage account. Requires enable_vendor_storage = true. When this is false the vendor-storage account still exists but blob events are silently dropped.')
+param enable_vendor_eventgrid bool = false
+
+@description('Enable the ventra_ingest event-driven Container Apps Job (KEDA azure-queue scaler on q-ventra-manifests). Requires enable_container_jobs + enable_vendor_storage + enable_vendor_eventgrid AND a real image in ACR.')
+param enable_ventra_ingest_job bool = false
+
+@description('Container image for ventra_ingest. Replace with acrhha{env}.azurecr.io/ventra-ingest:{sha} once C20 CI image-push lands.')
+param ventra_ingest_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
+@description('Ops recipient list for ventra_ingest notifications (success / quarantine / failure / incident). Comma-separated email addresses.')
+param ventra_ops_email_recipients string = 'areddy@hhamedicine.com'
+
+@description('Enable Azure Monitor alert rules for vendor-ingest (App Insights log alerts on ventra.validation_failed, ventra.adr005_violation, ventra.ingest_failed). Requires enable_monitor + enable_container_jobs.')
+param enable_vendor_alerts bool = false
+
+@description('Email receivers for the vendor-ingest Action Group. Array of {name, emailAddress} objects. Each receiver fan-outs from every alert below.')
+param vendor_alerts_email_receivers array = []
+
 @description('Enable Azure Communication Services (Email) for the daily 7am exec digest + credential expiry alerts. Uses an Azure Managed Domain in v0 (sender DoNotReply@<random>.azurecomm.net); custom domain attachment is a follow-up.')
 param enable_email bool = false
 
@@ -240,6 +280,50 @@ module storage './modules/storage.bicep' = if (enable_storage) {
   }
 }
 
+// Vendor-inbound Storage Account — Ventra ingest pipeline per ADR-006.
+// Separate account because HNS + SFTP are create-time-only properties; the
+// existing storage account was provisioned without them. Containers:
+// vendor-inbound, vendor-quarantine, vendor-deadletter. Local user `ventra`
+// is provisioned only when both enable_sftp is true AND a public key is
+// supplied — otherwise the account is still SAS-token-accessible for the
+// Snowflake-direct delivery channel (per Phase 1A.A3 of the plan).
+module vendorStorage './modules/vendor_storage.bicep' = if (enable_vendor_storage) {
+  name: 'vendor-storage-deploy'
+  params: {
+    name: vendor_storage_account_name
+    location: location
+    sku: vendor_storage_sku
+    soft_delete_retention_days: storage_soft_delete_retention_days
+    vendor_lifecycle_delete_days: vendor_storage_lifecycle_delete_days
+    enable_sftp: enable_sftp
+    ventra_sftp_public_key: ventra_sftp_public_key
+    deployer_workstation_ip: deployer_workstation_ip
+    pe_subnet_id: enable_vnet ? vnet!.outputs.pe_subnet_id : ''
+    tags: tags
+  }
+}
+
+// Vendor Event Grid — System Topic on vendor-storage + manifest-filtered
+// subscription → q-ventra-manifests Storage Queue. Requires
+// enable_vendor_storage = true (the topic source is the vendor account).
+// When this is false the storage account still exists but blob events are
+// silently dropped (operator can only see blob arrivals via manual scan).
+//
+// Gated separately from enable_vendor_storage so we can stand up the
+// storage account first (e.g. to seed a sample drop manually) and wire
+// the EG path in a follow-up deploy once the queue + topic are validated.
+module vendorEventGrid './modules/vendor_eventgrid.bicep' = if (enable_vendor_storage && enable_vendor_eventgrid) {
+  name: 'vendor-eventgrid-deploy'
+  params: {
+    vendor_storage_account_name: vendor_storage_account_name
+    location: location
+    tags: tags
+  }
+  dependsOn: [
+    vendorStorage
+  ]
+}
+
 // Log Analytics workspace + Application Insights — observability foundation.
 // Diagnostic Settings on each downstream resource (postgres, app service,
 // keyvault, storage) point at the workspace. Defined in this file (not the
@@ -306,6 +390,37 @@ module containerjobs './modules/containerjobs.bicep' = if (enable_container_jobs
     database_url: enable_keyvault
       ? '@Microsoft.KeyVault(VaultName=${kv_name};SecretName=database-url)'
       : database_url_literal
+    // ventra_ingest: gated on vendor-storage + EG + Container Apps env all
+    // being deployed. The job declaration itself is also internally gated
+    // by enable_ventra_ingest_job — passing false here skips the entire
+    // resource even if vendor-storage exists.
+    enable_ventra_ingest_job: enable_ventra_ingest_job && enable_vendor_storage && enable_vendor_eventgrid
+    ventra_ingest_image: ventra_ingest_image
+    vendor_storage_account_name: vendor_storage_account_name
+    app_insights_connection_string: enable_monitor ? monitor!.outputs.app_insights_connection_string : ''
+    ventra_ops_email_recipients: ventra_ops_email_recipients
+    tags: tags
+  }
+  dependsOn: [
+    // Bicep can usually infer this from the references above, but the
+    // listKeys() call on vendor-storage inside containerjobs needs the
+    // resource to exist before evaluation. Explicit edge for safety.
+    vendorStorage
+    vendorEventGrid
+  ]
+}
+
+// Vendor-ingest Azure Monitor alerts per Phase 1A.A9. Three log-query
+// alerts (validation_failed, adr005_violation, ingest_failed) routed
+// through a dedicated Action Group. Requires enable_monitor (need App
+// Insights as the scope) — gated separately so we can validate the alert
+// rules against a dev workspace before turning them on in prod.
+module vendorAlerts './modules/vendor_alerts.bicep' = if (enable_vendor_alerts && enable_monitor) {
+  name: 'vendor-alerts-deploy'
+  params: {
+    env_name_prefix: env_name
+    app_insights_id: monitor!.outputs.app_insights_id
+    email_receivers: vendor_alerts_email_receivers
     tags: tags
   }
 }

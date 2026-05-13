@@ -1,179 +1,344 @@
-"""Ventra ingest service tests.
+"""Ingest writer + IngestRun state-machine tests.
 
-Mocks the AsyncSession so tests run without Postgres. Verifies:
-  - well-formed rows produce one upsert each
-  - AR-bucket-vs-total mismatch outside tolerance is skipped (warning recorded)
-  - source_system + entered_by_upn are set correctly on every upsert
-  - empty list is a no-op (no execute calls)
+Pure unit tests — no DB. AsyncMock session lets us inspect the exact
+statements + parameters every `execute()` call receives without paying
+the cost of an integration test (those exist for the validators in
+test_ventra_validators.py).
+
+Coverage:
+  - IngestRun.start: INSERT into ops.ingest_run with correct params
+  - IngestRun.complete: terminal-status validation + UPDATE shape
+  - ingest_drop: per-file pg_insert.on_conflict_do_update + processed_files
+  - ingest_drop: skips empty file sections (physician_monthly omitted)
+  - ingest_drop: rolls back on mid-write IntegrityError
+  - IngestResult.vendor_source_systems dedups across rows
 """
 
 from __future__ import annotations
 
+import uuid
+from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from jobs.ventra_ingest.ingest import SERVICE_UPN, ingest_ventra_rows
-from jobs.ventra_ingest.parser import VentraRow
+from jobs.ventra_ingest.ingest import (
+    IngestRun,
+    ingest_drop,
+)
+from jobs.ventra_ingest.manifest import Manifest, ManifestEntry
+from jobs.ventra_ingest.parsers import (
+    ARSnapshotRow,
+    CollectionsRow,
+    PhysicianMonthlyRow,
+)
+from sqlalchemy.exc import IntegrityError
+
+pytestmark = pytest.mark.asyncio
 
 
-def _row(
-    *,
-    year: int = 2026,
-    month: int = 3,
-    collections: str = "2280000",
-    ar_total: str = "5600000",
-    buckets: tuple[str, str, str, str, str] = (
-        "1568000",
-        "1120000",
-        "784000",
-        "728000",
-        "1400000",
-    ),
-    ncr: str = "43",
-    days_in_ar: str = "39.9",
-) -> VentraRow:
-    return VentraRow(
-        year=year,
-        month=month,
-        collections_usd=Decimal(collections),
-        ventra_fee_usd=Decimal(collections) * Decimal("0.05"),
-        ar_total_usd=Decimal(ar_total),
-        ar_0_30_usd=Decimal(buckets[0]),
-        ar_31_60_usd=Decimal(buckets[1]),
-        ar_61_90_usd=Decimal(buckets[2]),
-        ar_91_120_usd=Decimal(buckets[3]),
-        ar_over_120_usd=Decimal(buckets[4]),
-        net_collection_rate_pct=Decimal(ncr),
-        days_in_ar=Decimal(days_in_ar),
+def _mock_session() -> MagicMock:
+    """Build a session whose ``async with .begin()`` is a no-op context
+    and whose ``execute`` / ``commit`` are async-mockable."""
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.commit = AsyncMock()
+
+    begin_cm = MagicMock()
+    begin_cm.__aenter__ = AsyncMock(return_value=None)
+    begin_cm.__aexit__ = AsyncMock(return_value=None)
+    session.begin = MagicMock(return_value=begin_cm)
+
+    return session
+
+
+def _collections_row(facility_no: int = 901, tag: str = "CB") -> CollectionsRow:
+    return CollectionsRow(
+        date=date(2026, 5, 15),
+        facility_no=facility_no,
+        payer_class="commercial",
+        gross_charges=Decimal("10000"),
+        payments_received=Decimal("8000"),
+        contractual_adjustments=Decimal("500"),
+        write_offs=Decimal("200"),
+        payer_refunds=Decimal("0"),
+        patient_refunds=Decimal("0"),
+        net_revenue=Decimal("7300"),
+        source_system=tag,
     )
 
 
-def _mock_db() -> MagicMock:
-    db = MagicMock()
-    db.execute = AsyncMock()
-    db.commit = AsyncMock()
-    return db
+def _ar_row(bucket: str = "0-30", tag: str = "CB") -> ARSnapshotRow:
+    return ARSnapshotRow(
+        snapshot_date=date(2026, 5, 15),
+        facility_no=901,
+        aging_bucket=bucket,  # type: ignore[arg-type]
+        outstanding_amount=Decimal("50000"),
+        source_system=tag,
+    )
 
 
-@pytest.mark.asyncio
-async def test_ingest_one_row_one_upsert() -> None:
-    db = _mock_db()
-    rows = [_row()]
+def _phys_row(tag: str = "CB") -> PhysicianMonthlyRow:
+    return PhysicianMonthlyRow(
+        month=date(2026, 5, 1),
+        physician_npi="1234567890",
+        facility_no=901,
+        encounters_count=50,
+        total_rvu=Decimal("100.5"),
+        total_work_rvu=Decimal("80.0"),
+        revenue_attributed=Decimal("75000"),
+        source_system=tag,
+    )
 
-    result = await ingest_ventra_rows(db, rows)
 
-    assert result.rows_upserted == 1
-    assert result.skipped == []
-    # Exactly one execute (the upsert) + one commit
+def _manifest() -> Manifest:
+    return Manifest(
+        drop_date=date(2026, 5, 15),
+        entries=[
+            ManifestEntry(file_name="collections.csv", sha256="a" * 64, row_count=1),
+            ManifestEntry(file_name="ar_snapshot.csv", sha256="b" * 64, row_count=1),
+        ],
+    )
+
+
+# =========================================================================
+# IngestRun.start / complete
+# =========================================================================
+
+
+async def test_ingest_run_start_inserts_with_running_status() -> None:
+    db = _mock_session()
+    run = await IngestRun.start(
+        db, drop_date=date(2026, 5, 15), manifest_path="ventra/2026-05-15/_MANIFEST.csv"
+    )
+
+    assert isinstance(run.run_id, uuid.UUID)
+    assert isinstance(run.correlation_id, uuid.UUID)
+    assert run.drop_date == date(2026, 5, 15)
+    assert run.manifest_path == "ventra/2026-05-15/_MANIFEST.csv"
+
+    # One INSERT issued
     assert db.execute.await_count == 1
-    assert db.commit.await_count == 1
+    sql_call, params_call = db.execute.await_args_list[0].args
+    sql_text = str(sql_call)
+    assert "INSERT INTO ops.ingest_run" in sql_text
+    assert "status = :status" not in sql_text  # not an UPDATE
+    assert params_call["vendor"] == "ventra"
+    assert params_call["dd"] == date(2026, 5, 15)
+    assert params_call["mp"] == "ventra/2026-05-15/_MANIFEST.csv"
+    assert params_call["run_id"] == run.run_id
+    assert params_call["cid"] == run.correlation_id
+
+    db.commit.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_ingest_multi_row_backfill() -> None:
-    db = _mock_db()
-    rows = [_row(month=1), _row(month=2), _row(month=3)]
-
-    result = await ingest_ventra_rows(db, rows)
-
-    assert result.rows_upserted == 3
-    assert db.execute.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_ingest_skips_row_when_buckets_dont_sum() -> None:
-    """AR buckets that don't add up to ar_total are flagged + skipped."""
-    db = _mock_db()
-    # ar_total claims 5.6M but buckets sum to 1M
-    bad = _row(
-        ar_total="5600000",
-        buckets=("200000", "200000", "200000", "200000", "200000"),
+async def test_ingest_run_start_accepts_explicit_correlation_id() -> None:
+    db = _mock_session()
+    cid = uuid.uuid4()
+    run = await IngestRun.start(
+        db, drop_date=date(2026, 5, 15), manifest_path="p", correlation_id=cid
     )
-
-    result = await ingest_ventra_rows(db, [bad])
-
-    assert result.rows_upserted == 0
-    assert result.skipped is not None
-    assert len(result.skipped) == 1
-    assert "AR buckets sum" in result.skipped[0]
-    # No upsert executed for the skipped row
-    assert db.execute.await_count == 0
+    assert run.correlation_id == cid
 
 
-@pytest.mark.asyncio
-async def test_ingest_within_tolerance_passes() -> None:
-    """1% rounding tolerance — buckets sum to $5,599,500 vs total $5,600,000."""
-    db = _mock_db()
-    near_match = _row(
-        ar_total="5600000",
-        buckets=("1568000", "1119500", "784000", "728000", "1400000"),  # off by $500
+@pytest.mark.parametrize("status", ["succeeded", "failed", "quarantined"])
+async def test_ingest_run_complete_accepts_each_terminal_status(status: str) -> None:
+    db = _mock_session()
+    run = IngestRun(
+        run_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        drop_date=date(2026, 5, 15),
+        manifest_path="p",
     )
+    await run.complete(db, status=status, rows_in=100, rows_out=98, files_count=2)
 
-    result = await ingest_ventra_rows(db, [near_match])
-
-    assert result.rows_upserted == 1
-    assert result.skipped == []
-
-
-@pytest.mark.asyncio
-async def test_ingest_empty_list_is_noop() -> None:
-    db = _mock_db()
-    result = await ingest_ventra_rows(db, [])
-
-    assert result.rows_upserted == 0
-    assert db.execute.await_count == 0
-    # commit still fires (cheap, idempotent on empty txn)
-    assert db.commit.await_count == 1
+    sql_call, params_call = db.execute.await_args_list[0].args
+    sql_text = str(sql_call)
+    assert "UPDATE ops.ingest_run" in sql_text
+    assert params_call["status"] == status
+    assert params_call["rows_in"] == 100
+    assert params_call["rows_out"] == 98
+    assert params_call["files_count"] == 2
+    assert params_call["run_id"] == run.run_id
+    db.commit.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_ingest_uses_service_upn_by_default() -> None:
-    """All rows attributed to the service UPN — the audit log will show this."""
-    assert SERVICE_UPN == "ventra-ingest@hhamedicine.com"
-
-    db = _mock_db()
-    await ingest_ventra_rows(db, [_row()])
-
-    # Inspect the upsert statement passed to execute — confirm it carries the
-    # right entered_by_upn. The compiled SQL is opaque to us here, but the
-    # `values()` call captures it as a parameter dict.
-    call = db.execute.await_args
-    stmt = call.args[0]
-    # SQLAlchemy Insert — pull out the Pythonic params
-    compiled = stmt.compile()
-    assert compiled.params["entered_by_upn"] == SERVICE_UPN
-    assert compiled.params["source_system"] == "VENTRA_FL_ATHENA"
-    assert compiled.params["state"] == "FL"
+async def test_ingest_run_complete_rejects_non_terminal_status() -> None:
+    db = _mock_session()
+    run = IngestRun(
+        run_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        drop_date=date(2026, 5, 15),
+        manifest_path="p",
+    )
+    with pytest.raises(ValueError, match="invalid terminal status"):
+        await run.complete(db, status="running")
+    db.execute.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_ingest_custom_service_upn() -> None:
-    db = _mock_db()
-    await ingest_ventra_rows(db, [_row()], service_upn="custom@hha.com")
+async def test_ingest_run_complete_serializes_error_details_to_json() -> None:
+    db = _mock_session()
+    run = IngestRun(
+        run_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        drop_date=date(2026, 5, 15),
+        manifest_path="p",
+    )
+    await run.complete(
+        db, status="failed", error_message="boom",
+        error_details={"rule": "V12", "facility_no": 999},
+    )
+    _, params_call = db.execute.await_args_list[0].args
+    assert params_call["error_message"] == "boom"
+    # JSON string, not dict — verified by parseability.
+    import json
+    parsed = json.loads(params_call["error_details"])
+    assert parsed == {"rule": "V12", "facility_no": 999}
 
-    compiled = db.execute.await_args.args[0].compile()
-    assert compiled.params["entered_by_upn"] == "custom@hha.com"
+
+# =========================================================================
+# ingest_drop
+# =========================================================================
 
 
-@pytest.mark.asyncio
-async def test_ingest_does_not_write_explicit_audit_row() -> None:
-    """Audit rows are written by the Postgres trigger (migration 0007), not
-    by the ingest service. The service must NOT call session.add() with an
-    AuditLog instance — that would produce duplicate rows.
+async def test_ingest_drop_writes_all_three_tables_plus_processed_files() -> None:
+    db = _mock_session()
+    parsed: dict[str, list] = {
+        "collections.csv": [_collections_row()],
+        "ar_snapshot.csv": [_ar_row()],
+        "physician_monthly.csv": [_phys_row()],
+    }
+    manifest = Manifest(
+        drop_date=date(2026, 5, 15),
+        entries=[
+            ManifestEntry(file_name="collections.csv", sha256="a" * 64, row_count=1),
+            ManifestEntry(file_name="ar_snapshot.csv", sha256="b" * 64, row_count=1),
+            ManifestEntry(file_name="physician_monthly.csv", sha256="c" * 64, row_count=1),
+        ],
+    )
+    run_id = uuid.uuid4()
+
+    result = await ingest_drop(db, parsed, manifest, run_id)
+
+    # Single transaction
+    db.begin.assert_called_once()
+
+    # 3 fact-table upserts + 3 processed_files inserts = 6 executes
+    assert db.execute.await_count == 6
+
+    # rows_by_table is populated for all three
+    assert result.rows_by_table == {
+        "fact_collections_daily": 1,
+        "fact_ar_snapshot": 1,
+        "fact_revenue_by_physician_mo": 1,
+    }
+    assert result.rows_written == 3
+
+
+async def test_ingest_drop_skips_empty_physician_monthly() -> None:
+    """Most daily drops have no physician_monthly file — verify the writer
+    does not error and does not issue an INSERT for the absent table."""
+    db = _mock_session()
+    parsed: dict[str, list] = {
+        "collections.csv": [_collections_row()],
+        "ar_snapshot.csv": [_ar_row()],
+    }
+    run_id = uuid.uuid4()
+
+    result = await ingest_drop(db, parsed, _manifest(), run_id)
+
+    # 2 fact-table upserts + 2 processed_files inserts = 4 executes
+    assert db.execute.await_count == 4
+    assert "fact_revenue_by_physician_mo" not in result.rows_by_table
+    assert result.rows_written == 2
+
+
+async def test_ingest_drop_aggregates_vendor_source_systems() -> None:
+    db = _mock_session()
+    parsed: dict[str, list] = {
+        "collections.csv": [
+            _collections_row(facility_no=901, tag="CB"),
+            _collections_row(facility_no=902, tag="MGS"),
+        ],
+        "ar_snapshot.csv": [_ar_row(tag="CB"), _ar_row(bucket="31-60", tag="VSQL")],
+    }
+    run_id = uuid.uuid4()
+
+    result = await ingest_drop(db, parsed, _manifest(), run_id)
+
+    # Dedup + sort
+    assert result.vendor_source_systems == ["CB", "MGS", "VSQL"]
+
+
+async def test_ingest_drop_passes_run_id_in_collections_values() -> None:
+    """Verify the run_id is stamped into the upsert values (so every row
+    on the fact table traces back to its ops.ingest_run row)."""
+    db = _mock_session()
+    parsed: dict[str, list] = {
+        "collections.csv": [_collections_row()],
+    }
+    run_id = uuid.uuid4()
+
+    await ingest_drop(db, parsed, _manifest(), run_id)
+
+    # First execute is the collections pg_insert
+    stmt = db.execute.await_args_list[0].args[0]
+    compiled_params = stmt.compile().params
+    assert compiled_params["ingest_run_id_m0"] == run_id
+
+
+async def test_ingest_drop_emits_processed_files_row_per_manifest_entry() -> None:
+    db = _mock_session()
+    parsed: dict[str, list] = {
+        "collections.csv": [_collections_row()],
+        "ar_snapshot.csv": [_ar_row()],
+    }
+    run_id = uuid.uuid4()
+
+    await ingest_drop(db, parsed, _manifest(), run_id)
+
+    # processed_files inserts are the last 2 executes (after 2 fact-table upserts)
+    processed_calls = db.execute.await_args_list[2:]
+    assert len(processed_calls) == 2
+
+    for call, expected_file in zip(processed_calls, ["collections.csv", "ar_snapshot.csv"], strict=True):
+        sql_text = str(call.args[0])
+        params = call.args[1]
+        assert "INSERT INTO ops.processed_files" in sql_text
+        assert params["vendor"] == "ventra"
+        assert params["dd"] == date(2026, 5, 15)
+        assert params["fn"] == expected_file
+        assert params["rid"] == run_id
+
+
+async def test_ingest_drop_propagates_integrity_error() -> None:
+    """If a mid-write IntegrityError fires (e.g. a DB CHECK constraint
+    violation slipped past our validators), the exception MUST propagate
+    out of ingest_drop so the outer except chain can quarantine + fail
+    the run. The ``async with db.begin():`` block rolls back automatically.
     """
-    from app.models.audit import AuditLog
+    db = _mock_session()
+    db.execute = AsyncMock(side_effect=IntegrityError("boom", None, Exception()))
 
-    db = _mock_db()
-    rows = [_row()]
+    parsed: dict[str, list] = {"collections.csv": [_collections_row()]}
+    run_id = uuid.uuid4()
 
-    await ingest_ventra_rows(db, rows)
+    with pytest.raises(IntegrityError):
+        await ingest_drop(db, parsed, _manifest(), run_id)
 
-    audit_adds = [
-        c for c in db.add.call_args_list
-        if c.args and isinstance(c.args[0], AuditLog)
-    ]
-    assert audit_adds == [], (
-        "ingest_ventra_rows must not write AuditLog rows directly — the "
-        "Postgres trigger handles audit. Found explicit add() calls."
-    )
+
+async def test_ingest_drop_no_op_on_completely_empty_parsed() -> None:
+    """Defensive: if every parsed list is empty, no fact-table writes,
+    but the manifest's processed_files rows still go in (V13 should not
+    have allowed us here, but the writer should be defensive)."""
+    db = _mock_session()
+    parsed: dict[str, list] = {}
+    run_id = uuid.uuid4()
+
+    result = await ingest_drop(db, parsed, _manifest(), run_id)
+
+    # Only the 2 processed_files inserts ran
+    assert db.execute.await_count == 2
+    assert result.rows_written == 0
+    assert result.rows_by_table == {}
+    assert result.vendor_source_systems == []

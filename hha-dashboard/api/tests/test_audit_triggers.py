@@ -29,6 +29,7 @@ the logic that doesn't touch the database.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import date
 from decimal import Decimal
@@ -318,7 +319,20 @@ AUDITED_TABLES_FQN: list[tuple[str, str]] = [
     ("entries", "monthly_finance_manual"),
     ("entries", "weekly_clinical"),
     ("entries", "weekly_hr_manual"),
+    # Added in migration 0011 (Ventra pre-aggregated facts per ADR-006).
+    ("entries", "fact_collections_daily"),
+    ("entries", "fact_ar_snapshot"),
+    ("entries", "fact_revenue_by_physician_mo"),
 ]
+
+
+def _test_ingest_run_uuid(upn: str) -> uuid.UUID:
+    """Deterministic UUID derived from the test's UPN — used as
+    ``ingest_run_id`` on every Ventra-fact-table insert in a single test
+    invocation. Lets ``_scrub_ctx`` clean up by this UUID afterwards
+    (the fact tables have no FK to ctx.site_id / ctx.physician_id, so
+    cleanup-by-parent doesn't apply)."""
+    return uuid.uuid5(uuid.NAMESPACE_DNS, upn)
 
 
 @pytest.mark.parametrize(("schema", "table"), AUDITED_TABLES_FQN)
@@ -639,6 +653,131 @@ async def _delete_weekly_hr_manual(s: AsyncSession, _: _TableOpCtx, rid: int) ->
     await s.commit()
 
 
+# ----- entries.fact_collections_daily (migration 0011, ADR-006) -----
+async def _seed_fact_collections_daily(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO entries.fact_collections_daily ("
+            "date, facility_no, payer_class, "
+            "gross_charges, payments_received, net_revenue, "
+            "ingest_run_id"
+            ") VALUES ("
+            ":d, :fn, 'commercial', "
+            "10000, 8000, 7500, "
+            ":rid"
+            ") RETURNING id"
+        ),
+        {"d": date(2026, 6, 1), "fn": 901, "rid": _test_ingest_run_uuid(ctx.upn)},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_fact_collections_daily(
+    s: AsyncSession, _: _TableOpCtx, rid: int
+) -> None:
+    await s.execute(
+        text(
+            "UPDATE entries.fact_collections_daily "
+            "SET payments_received = :v WHERE id = :id"
+        ),
+        {"v": Decimal("8500.00"), "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_fact_collections_daily(
+    s: AsyncSession, _: _TableOpCtx, rid: int
+) -> None:
+    await s.execute(
+        text("DELETE FROM entries.fact_collections_daily WHERE id = :id"),
+        {"id": rid},
+    )
+    await s.commit()
+
+
+# ----- entries.fact_ar_snapshot (migration 0011, ADR-006) -----
+async def _seed_fact_ar_snapshot(s: AsyncSession, ctx: _TableOpCtx) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO entries.fact_ar_snapshot ("
+            "snapshot_date, facility_no, aging_bucket, "
+            "outstanding_amount, ingest_run_id"
+            ") VALUES ("
+            ":d, :fn, '0-30', "
+            "50000, :rid"
+            ") RETURNING id"
+        ),
+        {"d": date(2026, 6, 1), "fn": 902, "rid": _test_ingest_run_uuid(ctx.upn)},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_fact_ar_snapshot(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text(
+            "UPDATE entries.fact_ar_snapshot "
+            "SET outstanding_amount = :v WHERE id = :id"
+        ),
+        {"v": Decimal("55000.00"), "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_fact_ar_snapshot(s: AsyncSession, _: _TableOpCtx, rid: int) -> None:
+    await s.execute(
+        text("DELETE FROM entries.fact_ar_snapshot WHERE id = :id"), {"id": rid}
+    )
+    await s.commit()
+
+
+# ----- entries.fact_revenue_by_physician_mo (migration 0011, ADR-006) -----
+async def _seed_fact_revenue_by_physician_mo(
+    s: AsyncSession, ctx: _TableOpCtx
+) -> int:
+    r = await s.execute(
+        text(
+            "INSERT INTO entries.fact_revenue_by_physician_mo ("
+            "month, physician_npi, facility_no, "
+            "encounters_count, revenue_attributed, ingest_run_id"
+            ") VALUES ("
+            ":m, '1234567890', :fn, "
+            "50, 75000, :rid"
+            ") RETURNING id"
+        ),
+        {"m": date(2026, 6, 1), "fn": 903, "rid": _test_ingest_run_uuid(ctx.upn)},
+    )
+    rid = int(r.scalar_one())
+    await s.commit()
+    return rid
+
+
+async def _update_fact_revenue_by_physician_mo(
+    s: AsyncSession, _: _TableOpCtx, rid: int
+) -> None:
+    await s.execute(
+        text(
+            "UPDATE entries.fact_revenue_by_physician_mo "
+            "SET encounters_count = :v WHERE id = :id"
+        ),
+        {"v": 55, "id": rid},
+    )
+    await s.commit()
+
+
+async def _delete_fact_revenue_by_physician_mo(
+    s: AsyncSession, _: _TableOpCtx, rid: int
+) -> None:
+    await s.execute(
+        text("DELETE FROM entries.fact_revenue_by_physician_mo WHERE id = :id"),
+        {"id": rid},
+    )
+    await s.commit()
+
+
 # Dispatch map keyed by "schema.table" → (seed, update, delete) triple.
 TABLE_OPS: dict[str, tuple[SeedFn, MutateFn, MutateFn]] = {
     "masters.physicians": (_seed_physicians, _update_physicians, _delete_physicians),
@@ -665,6 +804,21 @@ TABLE_OPS: dict[str, tuple[SeedFn, MutateFn, MutateFn]] = {
         _seed_weekly_hr_manual,
         _update_weekly_hr_manual,
         _delete_weekly_hr_manual,
+    ),
+    "entries.fact_collections_daily": (
+        _seed_fact_collections_daily,
+        _update_fact_collections_daily,
+        _delete_fact_collections_daily,
+    ),
+    "entries.fact_ar_snapshot": (
+        _seed_fact_ar_snapshot,
+        _update_fact_ar_snapshot,
+        _delete_fact_ar_snapshot,
+    ),
+    "entries.fact_revenue_by_physician_mo": (
+        _seed_fact_revenue_by_physician_mo,
+        _update_fact_revenue_by_physician_mo,
+        _delete_fact_revenue_by_physician_mo,
     ),
 }
 
@@ -745,6 +899,27 @@ async def _scrub_ctx(session: AsyncSession, ctx: _TableOpCtx) -> None:
     await session.execute(
         text("DELETE FROM entries.weekly_hr_manual WHERE entered_by_upn = :upn"),
         {"upn": ctx.upn},
+    )
+    # Ventra fact tables (migration 0011) — addressed by the deterministic
+    # ingest_run_id derived from the test's upn. No FK to ctx parents so
+    # cleanup-by-parent doesn't apply.
+    test_ingest_run = _test_ingest_run_uuid(ctx.upn)
+    await session.execute(
+        text(
+            "DELETE FROM entries.fact_collections_daily WHERE ingest_run_id = :rid"
+        ),
+        {"rid": test_ingest_run},
+    )
+    await session.execute(
+        text("DELETE FROM entries.fact_ar_snapshot WHERE ingest_run_id = :rid"),
+        {"rid": test_ingest_run},
+    )
+    await session.execute(
+        text(
+            "DELETE FROM entries.fact_revenue_by_physician_mo "
+            "WHERE ingest_run_id = :rid"
+        ),
+        {"rid": test_ingest_run},
     )
     # Now the parents.
     await session.execute(

@@ -49,6 +49,42 @@ param enable_storage = false
 param storage_sku = 'Standard_LRS'
 param storage_soft_delete_retention_days = 7
 
+// Vendor-inbound Storage — Ventra ingest pipeline per ADR-006. Off in dev
+// until Ventra confirms the delivery shape (SFTP vs Snowflake-direct).
+// Once they confirm + we have their SSH public key (SFTP path) or their
+// Snowflake account ID (direct path), flip enable_vendor_storage to true
+// here and seed ventra_sftp_public_key at deploy time via the -p flag.
+param enable_vendor_storage = false
+param vendor_storage_sku = 'Standard_LRS'
+param vendor_storage_lifecycle_delete_days = 90
+param enable_sftp = false
+param ventra_sftp_public_key = ''
+// Event Grid: System Topic on vendor-storage + manifest-filtered
+// subscription → q-ventra-manifests queue. Stays off until
+// enable_vendor_storage is flipped on (the topic source is the vendor
+// account). Two-stage rollout = land storage first, validate manually,
+// then wire the EG path.
+param enable_vendor_eventgrid = false
+// ventra_ingest event-driven Container Apps Job. Default off; flip to true
+// when (a) the placeholder image is replaced by a real ACR-pushed
+// ventra-ingest:{sha} (C20 CI workflow + C9-C16 Python code), and (b) the
+// dependencies (enable_container_jobs + enable_vendor_storage +
+// enable_vendor_eventgrid) are all on.
+param enable_ventra_ingest_job = false
+param ventra_ingest_image = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+param ventra_ops_email_recipients = 'areddy@hhamedicine.com'
+
+// Azure Monitor alerts for the vendor-ingest pipeline. Off in dev (no App
+// Insights, no need to alert on placeholder events). Flip to true after
+// enable_monitor goes on in dev for end-to-end smoke testing.
+param enable_vendor_alerts = false
+param vendor_alerts_email_receivers = [
+  {
+    name: 'akhil'
+    emailAddress: 'areddy@hhamedicine.com'
+  }
+]
+
 // Monitor — off in dev to save Log Analytics ingestion costs (~$2.30/GB).
 param enable_monitor = false
 param monitor_retention_days = 30

@@ -61,6 +61,56 @@ param enable_storage = true
 param storage_sku = 'Standard_RAGRS'
 param storage_soft_delete_retention_days = 90
 
+// Vendor-inbound Storage — Ventra ingest pipeline per ADR-006. Stays OFF
+// in prod until ALL of the following are true:
+//   1. Ventra has confirmed (in writing) the pre-aggregated delivery shape
+//   2. Delivery channel choice locked: SFTP or Snowflake-direct
+//   3. If SFTP: Ventra's public SSH key received and seeded into KV under
+//      'ventra-sftp-public-key' (rotated quarterly thereafter)
+//   4. If Snowflake-direct: SAS token generated, scoped to vendor-inbound
+//      with write-only permissions, communicated to Ventra via secure
+//      channel, also seeded into KV
+// Until then enable_vendor_storage stays false so the resource is never
+// provisioned and the ~$220/mo SFTP service fee doesn't accrue.
+// Standard_ZRS in prod — vendor drops cannot be replayed if the storage
+// account's region goes down, so zone redundancy is worth the small uplift.
+param enable_vendor_storage = false
+param vendor_storage_sku = 'Standard_ZRS'
+param vendor_storage_lifecycle_delete_days = 90
+param enable_sftp = false
+param ventra_sftp_public_key = ''
+// Event Grid wiring stays off in prod until enable_vendor_storage has
+// been flipped on AND a sample drop has been validated end-to-end in dev.
+// Two-stage rollout prevents a misconfigured subscription from dead-
+// lettering legitimate vendor drops to vendor-deadletter before anyone
+// notices.
+param enable_vendor_eventgrid = false
+// ventra_ingest event-driven Container Apps Job. Stays off in prod until
+// (a) vendor-storage + EG have been validated end-to-end in dev, (b) the
+// real ventra-ingest image is in acrhhaprod, and (c) Ventra has signaled
+// they're ready to send a test drop. Three-gate discipline prevents a
+// half-built job from spinning up against unfinished infra.
+param enable_ventra_ingest_job = false
+param ventra_ingest_image = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+param ventra_ops_email_recipients = 'areddy@hhamedicine.com,crystal@hhamedicine.com'
+
+// Azure Monitor alerts. ON in prod once enable_monitor is on (always true
+// per HIPAA audit chain). Three rules fire: validation_failed (Sev 2 Warn),
+// adr005_violation (Sev 0 Critical), ingest_failed (Sev 1 Error). All
+// route through ag-vendor-ingest-prod Action Group → email recipients
+// below. Flip to true on the same deploy as enable_monitor.
+param enable_vendor_alerts = false
+param vendor_alerts_email_receivers = [
+  {
+    name: 'akhil'
+    emailAddress: 'areddy@hhamedicine.com'
+  }
+  {
+    name: 'crystal'
+    emailAddress: 'crystal@hhamedicine.com'
+  }
+]
+
 // Monitor — ON in prod. Required for HIPAA audit chain.
 param enable_monitor = true
 param monitor_retention_days = 90

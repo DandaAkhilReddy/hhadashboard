@@ -154,3 +154,32 @@ async def delete_blob(container_name: str, blob_name: str) -> None:
         await container.delete_blob(blob_name)
     finally:
         await client.close()
+
+
+async def copy_blob(
+    source_container: str,
+    source_blob: str,
+    dest_container: str,
+    dest_blob: str,
+) -> None:
+    """Server-side copy within the same storage account.
+
+    Used by the Ventra quarantine flow (jobs/ventra_ingest/quarantine.py)
+    to move failed-validation drops from vendor-inbound to vendor-quarantine
+    without re-uploading bytes from the client. Idempotent: a second copy
+    to the same dest overwrites.
+
+    For same-account copies on Azure Blob the operation is synchronous
+    from the server's perspective — start_copy_from_url returns when the
+    copy is complete for small blobs (< 256 MiB). Pre-aggregated Ventra
+    CSVs are < 1 MiB total, so we do not poll for completion.
+    """
+    client = _build_client()
+    try:
+        source_url = (
+            f"{client.url}{source_container}/{source_blob}"
+        )
+        dest = client.get_container_client(dest_container).get_blob_client(dest_blob)
+        await dest.start_copy_from_url(source_url)
+    finally:
+        await client.close()
