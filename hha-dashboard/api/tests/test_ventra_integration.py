@@ -249,11 +249,21 @@ async def test_ingest_drop_is_idempotent_on_natural_key() -> None:
                 db, {"collections.csv": [_collections_row(drop, facility)]}, manifest, run.run_id
             )
 
-            # Mutate the row's payments and re-ingest with the SAME natural key.
-            # NOTE: re-using the same manifest would trip the
-            # ops.processed_files UNIQUE(vendor, sha256) constraint, so we
-            # build a fresh manifest with a different sha for the second
-            # call (mimicking a vendor restate scenario after V13 manual ack).
+            # Mimic the operator-managed replay procedure (runbook D.8):
+            # delete the prior processed_files row so V13 wouldn't quarantine
+            # AND the PK constraint on (vendor, drop_date, file_name) doesn't
+            # fire on the second insert. The fact-table UPSERT then exercises
+            # the on_conflict_do_update path on the natural key, which is
+            # what this test actually wants to verify.
+            await db.execute(
+                text(
+                    "DELETE FROM ops.processed_files "
+                    "WHERE run_id = :rid AND file_name = 'collections.csv'"
+                ),
+                {"rid": run.run_id},
+            )
+            await db.commit()
+
             second_manifest = Manifest(
                 drop_date=drop,
                 entries=[ManifestEntry(file_name="collections.csv", sha256="d" * 64, row_count=1)],

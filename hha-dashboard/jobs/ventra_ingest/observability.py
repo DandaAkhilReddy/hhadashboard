@@ -29,7 +29,7 @@ from datetime import date
 
 import structlog
 
-from app.core.logging import configure_logging, get_logger
+from app.core.logging import configure_logging
 from app.core.telemetry import setup_telemetry_for_job
 
 
@@ -63,20 +63,22 @@ ALL_EVENT_NAMES: frozenset[str] = frozenset(
 )
 
 
-# Module-scoped logger. Bind on import so even early failures (before
-# init_telemetry()) still carry vendor='ventra'.
-_log = get_logger("jobs.ventra_ingest").bind(vendor="ventra")
-
-
 def init_telemetry(log_level: str = "INFO") -> None:
     """One-call startup for the job: structlog JSON config + Azure
     Monitor OTel exporter (no-op when the connection string is empty).
 
     Call this exactly once from ``jobs.ventra_ingest.main:main`` before
     any other work. Idempotent within a process.
+
+    Also binds ``vendor='ventra'`` into the contextvars so every event
+    emitted thereafter carries that tag automatically. We bind via
+    contextvars (not via a pre-bound module-level logger) because the
+    latter is incompatible with ``structlog.testing.capture_logs``
+    under structlog's logger-caching policy.
     """
     configure_logging(log_level)
     setup_telemetry_for_job()
+    structlog.contextvars.bind_contextvars(vendor="ventra")
 
 
 def bind_run(
@@ -132,4 +134,8 @@ def emit_event(name: str, **kwargs: object) -> None:
             f"emit_event: unknown event name {name!r}; "
             f"add it to ALL_EVENT_NAMES + vendor_alerts.bicep if it's a new rule"
         )
-    _log.info(name, **kwargs)
+    # Fresh logger per call so structlog.testing.capture_logs can swap
+    # processors mid-test. A module-level pre-bound logger gets cached
+    # (cache_logger_on_first_use=True in app.core.logging) and bypasses
+    # capture_logs after the first invocation.
+    structlog.get_logger("jobs.ventra_ingest").info(name, **kwargs)
