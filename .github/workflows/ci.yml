@@ -78,8 +78,13 @@ jobs:
         # Phase 3 stair-step: thresholds in pyproject.toml stay at 0 until
         # baseline is measured here, then raise +5pp every ~10 commits to the
         # final 96 line / 85 branch gate. --cov-fail-under is the gate switch.
+        #
+        # `-p no:randomly` keeps the legacy declared test order during the
+        # gap-fill phase; J3 (Test Hygiene) judge opts in with a separate
+        # `--randomly-seed=last` run once a batch claims order-independence.
         run: >-
           uv run pytest -v
+          -p no:randomly
           --cov --cov-branch
           --cov-report=term-missing
           --cov-report=xml
