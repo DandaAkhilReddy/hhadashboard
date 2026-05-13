@@ -11,6 +11,7 @@ export default defineConfig({
     environment: "node",
     globals: false,
     include: ["__tests__/**/*.test.ts", "__tests__/**/*.test.tsx"],
+    setupFiles: ["./__tests__/setup.ts"],
     // Coverage configuration — Phase 3 of the plan (96 line / 85 branch).
     // Stair-stepped via CI; thresholds here stay at 0 so local
     // `npm run test` stays fast and unblocked.
