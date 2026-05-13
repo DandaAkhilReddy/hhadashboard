@@ -10,7 +10,6 @@ quarantine path — exactly the kind of regression CI must catch.
 from __future__ import annotations
 
 import pytest
-
 from jobs.ventra_ingest.exceptions import ADRViolation, DedupSkip, ValidationError
 
 
@@ -108,12 +107,10 @@ class TestADRViolation:
     def test_caught_as_validation_error_via_subclass_check(self) -> None:
         """The orchestrator may catch ValidationError after the ADRViolation
         clause — make sure the subclass still satisfies that catch."""
-        try:
+        with pytest.raises(ValidationError) as exc_info:
             raise ADRViolation(message="boom")
-        except ValidationError as e:
-            assert e.rule == "V12"
-        else:  # pragma: no cover - sanity guard, would fail above
-            pytest.fail("expected ADRViolation to be caught as ValidationError")
+        assert exc_info.value.rule == "V12"
+        assert isinstance(exc_info.value, ADRViolation)
 
 
 class TestDedupSkip:
