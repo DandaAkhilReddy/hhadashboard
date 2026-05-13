@@ -69,3 +69,30 @@ asyncio_default_fixture_loop_scope = "session"
 testpaths = ["tests"]
 # "." = api/ (for app.*), ".." = hha-dashboard/ (for jobs.*)
 pythonpath = [".", ".."]
+
+# Coverage configuration — Phase 3 of the plan (96% line / 85% branch target).
+# Invocation is opt-in via `--cov` (see CI workflow). Local devs can still run
+# `uv run pytest` without coverage for fast feedback.
+[tool.coverage.run]
+branch = true
+source = ["app", "../jobs"]
+omit = [
+    "alembic/versions/*",  # migrations exercised via integration tests
+    "tests/*",
+]
+relative_files = true
+
+[tool.coverage.report]
+# Stair-stepped during Phase 3. Final target: 96 (line) / 85 (branch, via
+# --cov-fail-under-branch in CI). Keep at 0 here so the threshold lives in CI
+# and a missed local run does not silently mask regressions.
+fail_under = 0
+show_missing = true
+skip_covered = false
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "@(abc\\.)?abstractmethod",
+    "\\.\\.\\.",
+]
