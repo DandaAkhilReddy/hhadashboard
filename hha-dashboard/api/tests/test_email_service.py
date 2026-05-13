@@ -141,3 +141,134 @@ async def test_lazy_client_init_does_not_import_sdk_when_unconfigured() -> None:
     with patch("app.services.email.EmailService._get_client") as mock_get:
         await svc.send_html_email(to="x@y", subject="s", html_body="<p>b</p>")
         mock_get.assert_not_called()
+
+
+# ----- _get_client() lazy-init paths (Phase 3 coverage uplift) -----
+
+
+def test_get_client_uses_connection_string_when_present() -> None:
+    """Connection-string path: dev/local. Must call from_connection_string
+    rather than constructing with DefaultAzureCredential."""
+    fake_client = MagicMock(name="EmailClient")
+    fake_from_cs = MagicMock(return_value=fake_client)
+
+    svc = EmailService(
+        connection_string="endpoint=https://x;accesskey=k",
+        sender="DoNotReply@hha.test",
+    )
+
+    with patch(
+        "azure.communication.email.EmailClient.from_connection_string",
+        fake_from_cs,
+    ):
+        client = svc._get_client()
+
+    assert client is fake_client
+    fake_from_cs.assert_called_once_with("endpoint=https://x;accesskey=k")
+
+
+def test_get_client_falls_back_to_managed_identity_when_no_connection_string() -> None:
+    """Production path: MI via DefaultAzureCredential. Triggered when
+    endpoint is set and connection_string is empty."""
+    fake_credential = MagicMock(name="DefaultAzureCredential-instance")
+    fake_credential_factory = MagicMock(return_value=fake_credential)
+    fake_client = MagicMock(name="EmailClient")
+    fake_client_ctor = MagicMock(return_value=fake_client)
+
+    svc = EmailService(
+        endpoint="https://hha.communication.azure.com",
+        connection_string="",
+        sender="DoNotReply@hha.test",
+    )
+
+    with (
+        patch("azure.identity.DefaultAzureCredential", fake_credential_factory),
+        patch("azure.communication.email.EmailClient", fake_client_ctor),
+    ):
+        client = svc._get_client()
+
+    assert client is fake_client
+    fake_credential_factory.assert_called_once_with()
+    fake_client_ctor.assert_called_once_with(
+        "https://hha.communication.azure.com",
+        fake_credential,
+    )
+
+
+def test_get_client_is_cached_on_second_call() -> None:
+    """The lazy-init path runs once; subsequent calls return the cached
+    client. Without caching, every send_html_email would re-init the SDK
+    and re-resolve MI — wasteful and would also re-import the heavy
+    azure.communication.email module."""
+    fake_client = MagicMock(name="EmailClient-cached")
+    fake_from_cs = MagicMock(return_value=fake_client)
+
+    svc = EmailService(
+        connection_string="endpoint=https://x;accesskey=k",
+        sender="DoNotReply@hha.test",
+    )
+
+    with patch(
+        "azure.communication.email.EmailClient.from_connection_string",
+        fake_from_cs,
+    ):
+        first = svc._get_client()
+        second = svc._get_client()
+
+    assert first is second
+    fake_from_cs.assert_called_once()  # never called the second time
+
+
+@pytest.mark.asyncio
+async def test_send_email_omits_plain_text_when_none() -> None:
+    """If plain_text_body is None, the ACS message must NOT carry a
+    plainText field — passing plainText=None makes ACS reject the request
+    with a validation error."""
+    fake_poller = MagicMock()
+    fake_poller.result.return_value = {"id": "html-only", "status": "Succeeded"}
+    fake_client = MagicMock()
+    fake_client.begin_send.return_value = fake_poller
+
+    svc = EmailService(
+        connection_string="endpoint=https://x;accesskey=k",
+        sender="DoNotReply@hha.test",
+    )
+    svc._client = fake_client
+
+    msg_id = await svc.send_html_email(
+        to="exec@hha.test",
+        subject="No plain",
+        html_body="<p>html only</p>",
+        plain_text_body=None,
+    )
+
+    assert msg_id == "html-only"
+    sent_message = fake_client.begin_send.call_args.args[0]
+    assert "plainText" not in sent_message["content"]
+    assert sent_message["content"]["html"] == "<p>html only</p>"
+
+
+@pytest.mark.asyncio
+async def test_send_email_returns_empty_string_when_acs_omits_id() -> None:
+    """Defensive: result.get('id', '') defaults to '' if ACS ever omits the
+    id field — the caller still gets a non-None message_id so they can
+    distinguish a real send from the not-configured short-circuit (None)."""
+    fake_poller = MagicMock()
+    fake_poller.result.return_value = {"status": "Succeeded"}  # no 'id' key
+    fake_client = MagicMock()
+    fake_client.begin_send.return_value = fake_poller
+
+    svc = EmailService(
+        connection_string="endpoint=https://x;accesskey=k",
+        sender="DoNotReply@hha.test",
+    )
+    svc._client = fake_client
+
+    msg_id = await svc.send_html_email(
+        to="recipient@hha.test",
+        subject="weird ACS reply",
+        html_body="<p>x</p>",
+    )
+
+    assert msg_id == ""
+    assert msg_id is not None  # NOT the not-configured short-circuit
