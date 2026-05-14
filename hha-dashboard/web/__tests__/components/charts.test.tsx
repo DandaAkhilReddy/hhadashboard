@@ -21,8 +21,8 @@ beforeAll(() => {
     unobserve(): void {}
     disconnect(): void {}
   }
-  // @ts-expect-error happy-dom doesn't ship this global
-  globalThis.ResizeObserver = ResizeObserverStub;
+  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+    ResizeObserverStub;
 });
 
 // ResponsiveContainer auto-measures parent dimensions; force a fixed

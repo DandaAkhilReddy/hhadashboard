@@ -206,7 +206,7 @@ describe("AlertBanner", () => {
       {
         id: "a1",
         severity: "red" as const,
-        category: "finance",
+        category: "finance" as const,
         owner: "Sandy",
         title: "Collections below target",
         detail: "Shortfall $44k/day",
@@ -214,7 +214,7 @@ describe("AlertBanner", () => {
       {
         id: "a2",
         severity: "yellow" as const,
-        category: "ops",
+        category: "operations" as const,
         owner: "Crystal",
         title: "Census drift",
         detail: "Westside −12",
@@ -237,7 +237,7 @@ describe("AlertBanner", () => {
       {
         id: `a-${severity}`,
         severity,
-        category: "x",
+        category: "finance" as const,
         owner: "y",
         title: "t",
         detail: "d",
