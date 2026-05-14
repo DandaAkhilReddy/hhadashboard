@@ -14,6 +14,7 @@ if (isDom) {
   // Node-environment tests from pulling DOM-only globals.
   await import("@testing-library/jest-dom/vitest");
 
+  const { cleanup } = await import("@testing-library/react");
   const { server } = await import("./msw/server");
 
   beforeAll(() => {
@@ -21,6 +22,10 @@ if (isDom) {
   });
 
   afterEach(() => {
+    // RTL's cleanup() unmounts every component rendered in the previous
+    // test. Without this, getByText / getByRole find leftover nodes from
+    // prior renders ("Found multiple elements" errors).
+    cleanup();
     server.resetHandlers();
   });
 
