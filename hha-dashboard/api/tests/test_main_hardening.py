@@ -225,3 +225,115 @@ async def test_http_exception_keeps_status_and_message() -> None:
     body = r.json()
     assert body["error"]["code"] == 403
     assert "correlation_id" in body
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 gap-fill: set_current_upn_middleware swallow + alembic head cache
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_middleware_swallows_get_current_user_exception() -> None:
+    """The middleware tries to resolve UPN from the request header so that
+    audit attribution works for authenticated routes; if get_current_user
+    raises (malformed header, network blip in JWT path), the middleware
+    must NOT crash the response — it falls back to upn='__system__' and
+    lets the downstream Depends(get_current_user) do the 401.
+
+    Force the exception by patching app.main.get_current_user to raise;
+    the request still completes 200 from /health (which has no auth dep)."""
+    from app.main import app
+    from app.services.audit import current_upn
+
+    captured: dict[str, str] = {}
+
+    async def _raising_get_current_user(*, authorization: str | None = None) -> object:
+        _ = authorization
+        raise RuntimeError("simulated auth failure inside middleware")
+
+    @app.get("/_capture_middleware_swallow")
+    async def _capture() -> dict[str, str]:
+        captured["upn"] = current_upn.get()
+        return {"upn": current_upn.get()}
+
+    with patch("app.main.get_current_user", _raising_get_current_user):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.get(
+                "/_capture_middleware_swallow",
+                headers={"Authorization": "Dev owner_ops"},
+            )
+
+    # Middleware swallowed the exception → request completes cleanly
+    assert r.status_code == 200
+    # And the contextvar was left at __system__ rather than the real UPN
+    # because the exception fired before `upn = user.upn`.
+    assert captured["upn"] == "__system__"
+
+
+def test_expected_alembic_revision_caches_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The /ready handler computes the alembic head once per process by
+    globbing alembic/versions/. The second call must return the cached
+    value without re-doing the glob (otherwise every health probe re-
+    walks the filesystem)."""
+    import app.main as main_mod
+
+    # Reset the cache to force a fresh compute first.
+    monkeypatch.setattr(main_mod, "_CACHED_ALEMBIC_HEAD", None)
+
+    first = main_mod._expected_alembic_revision()
+    # Looks like '0019' or similar — 4+ digits, all numeric
+    assert first.isdigit()
+    assert len(first) >= 4
+
+    # Second call must short-circuit on the cache. Sentinel via the
+    # module-level variable: if it were re-computed, _CACHED_ALEMBIC_HEAD
+    # would still be set to `first`, so we'd see the same answer. To
+    # PROVE caching, mutate the cache and confirm the function returns
+    # the mutated value (rather than re-globbing).
+    monkeypatch.setattr(main_mod, "_CACHED_ALEMBIC_HEAD", "9999")
+    cached = main_mod._expected_alembic_revision()
+
+    assert cached == "9999"  # proves we hit the cache branch, not re-glob
+
+
+@pytest.mark.asyncio
+async def test_middleware_attributes_authenticated_dev_user_in_upn() -> None:
+    """Happy path on the middleware: Dev header → user.upn is captured
+    into the audit contextvar BEFORE the route handler runs. Verifies by
+    asserting current_upn during a route call."""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import set_current_upn_middleware
+    from app.services.audit import current_upn
+
+    test_app = FastAPI()
+    test_app.middleware("http")(set_current_upn_middleware)
+
+    captured_upn: dict[str, str] = {}
+
+    @test_app.get("/_capture_upn")
+    async def _route() -> dict[str, str]:
+        captured_upn["value"] = current_upn.get()
+        return {"upn": current_upn.get()}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app), base_url="http://test"
+    ) as client:
+        r = await client.get(
+            "/_capture_upn", headers={"Authorization": "Dev owner_ops"}
+        )
+
+    assert r.status_code == 200
+    assert captured_upn["value"] == "dev-owner_ops@local"
+    # And the contextvar resets after the response (in the finally block)
+    # — verified indirectly by a follow-up request with no auth header
+    # returning the system default.
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app), base_url="http://test"
+    ) as client:
+        r2 = await client.get("/_capture_upn")
+
+    assert r2.json()["upn"] == "__system__"
