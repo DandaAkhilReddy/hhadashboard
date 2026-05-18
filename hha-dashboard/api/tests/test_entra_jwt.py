@@ -323,3 +323,224 @@ def test_extract_roles_is_empty_for_claim_names_overage() -> None:
     # via model_extra since Pydantic treats _-prefixed fields specially).
     # The point of this test is that extract_roles returns set() not crash.
     assert ej.extract_roles(claims) == set()
+
+
+# ----- _fetch_jwks HTTP path (Phase 3 gap-fill) -----
+
+
+import httpx  # noqa: E402  -- intentional late import for the gap-fill block
+
+
+def _reset_jwks_cache() -> None:
+    """Wipe the module-level JWKS cache between tests so cache-hit vs
+    cache-miss paths can be exercised deterministically."""
+    ej._jwks_cache["keys"] = None
+    ej._jwks_cache["fetched_at"] = 0.0
+
+
+@pytest.mark.asyncio
+async def test_fetch_jwks_calls_entra_endpoint_on_cache_miss(
+    monkeypatch: pytest.MonkeyPatch, rsa_keypair: tuple[Any, dict[str, Any]]
+) -> None:
+    """First call: no cache → hits the Entra discovery endpoint over HTTPS
+    and stores the result. Mocks httpx.AsyncClient at the transport layer
+    via MockTransport so no real network I/O happens."""
+    _, jwk = rsa_keypair
+    _reset_jwks_cache()
+    monkeypatch.setattr(ej.settings, "azure_tenant_id", TENANT_ID, raising=False)
+
+    requested_urls: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
+        return httpx.Response(200, json={"keys": [jwk]})
+
+    transport = httpx.MockTransport(_handler)
+    real_async_client = httpx.AsyncClient
+
+    def _client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory)
+
+    keys = await ej._fetch_jwks()
+
+    assert keys == [jwk]
+    assert len(requested_urls) == 1
+    assert requested_urls[0].endswith("/discovery/v2.0/keys")
+    assert TENANT_ID in requested_urls[0]
+    # Cache populated
+    assert ej._jwks_cache["keys"] == [jwk]
+    assert ej._jwks_cache["fetched_at"] > 0.0
+
+
+@pytest.mark.asyncio
+async def test_fetch_jwks_returns_cached_keys_without_network_on_second_call(
+    monkeypatch: pytest.MonkeyPatch, rsa_keypair: tuple[Any, dict[str, Any]]
+) -> None:
+    """After a successful first fetch, a second call (within TTL) returns
+    the cached keys and does NOT touch the network. Without this, every
+    request would round-trip to Entra — bad for latency and rate limits."""
+    _, jwk = rsa_keypair
+    monkeypatch.setattr(ej.settings, "azure_tenant_id", TENANT_ID, raising=False)
+    ej._jwks_cache["keys"] = [jwk]
+    ej._jwks_cache["fetched_at"] = time.time()
+
+    request_count = 0
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={"keys": [jwk]})
+
+    transport = httpx.MockTransport(_handler)
+    real_async_client = httpx.AsyncClient
+
+    def _client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory)
+
+    keys = await ej._fetch_jwks()
+
+    assert keys == [jwk]
+    assert request_count == 0  # cache hit, no network
+
+
+@pytest.mark.asyncio
+async def test_fetch_jwks_refetches_when_force_refresh_true(
+    monkeypatch: pytest.MonkeyPatch, rsa_keypair: tuple[Any, dict[str, Any]]
+) -> None:
+    """force_refresh=True bypasses the cache — used by verify_access_token
+    when a kid is not found, in case of mid-flight key rotation."""
+    _, jwk = rsa_keypair
+    monkeypatch.setattr(ej.settings, "azure_tenant_id", TENANT_ID, raising=False)
+    ej._jwks_cache["keys"] = [{"kid": "stale", "kty": "RSA"}]
+    ej._jwks_cache["fetched_at"] = time.time()
+
+    request_count = 0
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={"keys": [jwk]})
+
+    transport = httpx.MockTransport(_handler)
+    real_async_client = httpx.AsyncClient
+
+    def _client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory)
+
+    keys = await ej._fetch_jwks(force_refresh=True)
+
+    assert keys == [jwk]
+    assert request_count == 1
+    # Cache updated with fresh keys
+    assert ej._jwks_cache["keys"] == [jwk]
+
+
+@pytest.mark.asyncio
+async def test_fetch_jwks_refetches_when_cache_is_expired(
+    monkeypatch: pytest.MonkeyPatch, rsa_keypair: tuple[Any, dict[str, Any]]
+) -> None:
+    """Cache TTL is 24h; older than that → refetch even without force."""
+    _, jwk = rsa_keypair
+    monkeypatch.setattr(ej.settings, "azure_tenant_id", TENANT_ID, raising=False)
+    ej._jwks_cache["keys"] = [{"kid": "stale", "kty": "RSA"}]
+    # Pretend the cache was fetched 25h ago
+    ej._jwks_cache["fetched_at"] = time.time() - (25 * 60 * 60)
+
+    request_count = 0
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        nonlocal request_count
+        request_count += 1
+        return httpx.Response(200, json={"keys": [jwk]})
+
+    transport = httpx.MockTransport(_handler)
+    real_async_client = httpx.AsyncClient
+
+    def _client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _client_factory)
+
+    keys = await ej._fetch_jwks()
+
+    assert keys == [jwk]
+    assert request_count == 1
+
+
+# ----- verify_access_token edge cases (Phase 3 gap-fill) -----
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("configured_entra")
+async def test_verify_rejects_token_with_missing_kid_header() -> None:
+    """A JWT whose header has no 'kid' field can't be matched to a JWKS
+    key. We must 401 with a specific message — debugging this otherwise
+    requires reading App Insights traces."""
+    # Build a JWT manually with no kid header. jose accepts headers={} and
+    # does not auto-add kid. Sign with HS256 since we just need parseable
+    # bytes — verify_access_token rejects on missing kid before signature
+    # verification runs.
+    raw = jwt.encode({"sub": "x"}, "secret", algorithm="HS256", headers={})
+
+    with pytest.raises(HTTPException) as excinfo:
+        await ej.verify_access_token(raw)
+
+    assert excinfo.value.status_code == 401
+    assert "kid" in excinfo.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_verify_rejects_signature_mismatch_with_jwt_error(
+    monkeypatch: pytest.MonkeyPatch,
+    rsa_keypair: tuple[rsa.RSAPrivateKey, dict[str, Any]],
+) -> None:
+    """A token signed by the wrong key triggers the generic JWTError path
+    (not ExpiredSignatureError, not JWTClaimsError). Must surface a 401
+    with 'signature invalid' so operators can distinguish from expiry or
+    audience problems."""
+    _, jwk = rsa_keypair
+    monkeypatch.setattr(ej.settings, "azure_tenant_id", TENANT_ID, raising=False)
+    monkeypatch.setattr(ej.settings, "azure_api_client_id", API_CLIENT_ID, raising=False)
+
+    async def _fake_fetch(*, force_refresh: bool = False) -> list[dict[str, Any]]:
+        _ = force_refresh
+        return [jwk]
+
+    monkeypatch.setattr(ej, "_fetch_jwks", _fake_fetch)
+
+    # Sign with a DIFFERENT RSA key — signature won't verify against the
+    # JWK our jwks fixture exposes.
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    other_pem = other_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    now = int(time.time())
+    claims = {
+        "aud": API_CLIENT_ID,
+        "iss": ISSUER,
+        "iat": now,
+        "nbf": now,
+        "exp": now + 3600,
+        "preferred_username": "alice@hha.com",
+    }
+    bad_token = jwt.encode(
+        claims, other_pem, algorithm="RS256", headers={"kid": jwk["kid"]}
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await ej.verify_access_token(bad_token)
+
+    assert excinfo.value.status_code == 401
+    assert "signature" in excinfo.value.detail.lower()
