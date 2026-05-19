@@ -3,6 +3,8 @@
 > Locked 2026-05-14 alongside the Phase 3 coverage uplift (PR #55,
 > branch `feat/coverage-96`). Future test additions should follow the
 > conventions here.
+>
+> Round 3 added 27 commits / ~730 tests; pattern catalog updated 2026-05-18.
 
 ## Layout
 
@@ -49,6 +51,18 @@ The local `pyproject.toml` keeps `fail_under = 0` so a single
 `uv run pytest` for a specific file doesn't fail on the global
 threshold. The CI workflow owns the gate via the `--cov-fail-under`
 flag — that's the single source of truth.
+
+Round 3 closed 4 of 7 originally-deferred Stage 2 batches (audit
+service, audit-direct duplicate, census_auth, fake_data) via the
+metadata-pin substitution (Pattern 1 below) and the route-handler
+direct-call pattern (Pattern 3 below). Remaining DB-bound work that
+still needs Postgres before it can land:
+
+- `services/comp.py::effective_comp_at` — async DB query for active
+  comp_agreement window.
+- `services/entries_history.py::get_site_recent_entries` — async
+  DB query against `entries.daily_entries`.
+- `routers/sites.py` — TestClient + RBAC integration tests.
 
 ## Test environment quirks
 
@@ -164,6 +178,95 @@ vi.mock("@/lib/auth/msal-config", () => ({
 Mocks must precede page imports — vitest hoists `vi.mock` but the import
 order still matters for clarity.
 
+## Patterns introduced in round 3 (2026-05-18)
+
+Three patterns landed during the round-3 push that let coverage advance
+on surfaces normally gated by Postgres. Apply these instead of skipping
+the surface entirely when Docker is not available locally.
+
+### Pattern 1 — Metadata-pin substitution (for SQLAlchemy models)
+
+When the originally-planned unit test for a service would need a real
+Postgres, **substitute a metadata-pin test on the corresponding model
+file**. Pin everything the migration locks at unit speed:
+
+- `__tablename__` and `__table__.schema`
+- Every `CheckConstraint` by name suffix (the metadata
+  `naming_convention` in `app/models/base.py` prefixes CK names with
+  `ck_<table_name>_`, so callers test the suffix)
+- Every `UniqueConstraint` by name
+- Every `ForeignKey.ondelete` action — locks RESTRICT vs CASCADE vs
+  SET NULL
+- Every column's `info["data_class"]` per ADR-001
+- Any StrEnum exported from the model module — assert the full value
+  set so a typo in a member name is caught at unit speed
+
+Reference implementations:
+
+- `api/tests/test_entries_manual_models.py` — finance/clinical/HR (50 tests)
+- `api/tests/test_alerts_model.py` — three alert tables (26 tests)
+- `api/tests/test_masters_and_uploads_models.py` — six masters tables, uploads, entries, auth (103 tests)
+- `api/tests/test_audit_model.py` — audit_log shape + JSON_VARIANT (32 tests)
+
+Helper convention (defined per test file):
+
+```python
+def _has_check(model: type, suffix: str) -> bool:
+    return any(
+        c.name is not None and c.name.endswith(suffix)
+        for c in model.__table__.constraints
+        if isinstance(c, CheckConstraint)
+    )
+```
+
+The suffix match lets the constraint author keep using terse local
+names in the model (`month_valid`, `state_valid`); the test asserts the
+rendered global name ends with that local name.
+
+### Pattern 2 — Router pure-helper extraction
+
+When a router file has private synchronous helpers
+(`_make_blob_name`, `_last_sunday`, `_source_for_state`,
+`_buckets_to_schema`, `_allowed_extension`), test them directly in
+`tests/test_router_helpers.py` even though the public endpoints need
+TestClient + Postgres.
+
+Reference: `api/tests/test_router_helpers.py` covers 5 helpers across 3
+routers in 32 tests. The endpoint integration tests
+(`test_entries_router.py`, etc.) cover the public surface separately.
+
+### Pattern 3 — FastAPI / Next.js route-handler direct-call
+
+For thin route handlers (FastAPI dependency, Next.js Route Handler,
+Next.js middleware, server component), **call the handler directly with
+mocked boundary modules**. This skips TestClient / Next dev server / a
+running event grid emulator and runs in milliseconds.
+
+FastAPI / async-job examples:
+
+- `api/tests/test_paycom_sync_configured.py` — `run()` with mocked
+  `SessionLocal`, `ROUTES`, `settings`, `log`.
+- `api/tests/test_upload_ingest_main.py` — `_claim_work` +
+  `_process_one` with mocked AsyncSession + Azure blob SDK.
+- `api/tests/test_census_auth_service.py` — public auth functions
+  with mocked `AsyncSession.execute(...).scalar_one_or_none()` chain.
+
+Next.js route / middleware examples:
+
+- `web/__tests__/lib/auth-me-route.test.ts` — `GET()` from
+  `/api/auth/me/route.ts` with mocked `next/headers` + session-crypto.
+- `web/__tests__/session-route-edges.test.ts` — `POST()` / `DELETE()`
+  from `/api/auth/session/route.ts` with raw `Request` objects.
+- `web/__tests__/middleware-census.test.ts` — `middleware()` directly
+  with constructed `NextRequest` objects.
+- `web/__tests__/pages/census-entry-page.test.tsx` — async server
+  component with mocked `next/headers` + `next/navigation.redirect`.
+
+The handler-direct call pattern works for both Next.js App Router
+Route Handlers (export `GET` / `POST` / `DELETE`) and async server
+components (the default export is an async function returning JSX,
+awaitable from a test).
+
 ## What this push did NOT do
 
 - **Did not refactor source.** Test-only changes. If a line of source
@@ -183,8 +286,14 @@ order still matters for clarity.
    `npm run test:coverage`).
 2. Pick a Tier and create the test file (mirror source layout —
    `app/services/blob.py` → `tests/test_blob_service.py`).
-3. Run inline J1 (coverage) and J5 (lint) checks locally.
-4. If the file pattern is novel (first MSAL test, first chart test),
+3. If the source needs Postgres but the file you're testing is a
+   SQLAlchemy model, write a metadata-pin test instead (Pattern 1
+   above). If the source is a thin route handler / middleware /
+   server component, call it directly with mocked boundaries
+   (Pattern 3). If the source is a router with private synchronous
+   helpers, extract those into `test_router_helpers.py` (Pattern 2).
+4. Run inline J1 (coverage) and J5 (lint) checks locally.
+5. If the file pattern is novel (first MSAL test, first chart test),
    spawn a `reviewer` sub-agent for J2/J3/J4. Otherwise inline review.
-5. Commit with `test(<scope>): <description>` — one logical change.
-6. Push, watch CI, and repeat.
+6. Commit with `test(<scope>): <description>` — one logical change.
+7. Push, watch CI, and repeat.
