@@ -94,6 +94,13 @@ param ventra_stdspec_sftp_public_key string = ''
 @maxValue(90)
 param vendor_stdspec_lifecycle_delete_days int = 30
 
+@description('Phase 4 hybrid — enable the pre-aggregated SFTP user. The pre-Phase-4 single ``ventra`` user stays for backward compatibility until H14 cuts the pre-agg pipeline over to this dedicated user. Setting both true is intentional during the transition window. Creates the ventra-preagg local user with homeDirectory = vendor-inbound/ventra/preagg.')
+param enable_ventra_preagg bool = false
+
+@secure()
+@description('Phase 4 hybrid — Ventra SSH public key for the preagg (pre-aggregated / no-PHI) SFTP user. Separate from ventra_stdspec_sftp_public_key so the two paths can be rotated independently and a key leak on one path does not compromise the other. Stored in KV as ventra-preagg-sftp-public-key.')
+param ventra_preagg_sftp_public_key string = ''
+
 @description('Deployer workstation IP for the network ACL allowlist. Only used in public-access mode.')
 param deployer_workstation_ip string = ''
 
@@ -109,6 +116,11 @@ var sftp_ready = enable_sftp && !empty(ventra_sftp_public_key)
 // flipped, and (c) Ventra's public key supplied. Any missing piece skips the
 // local-user resource — Bicep ``if (...)`` resolves at compile-time.
 var stdspec_ready = enable_sftp && enable_ventra_stdspec && !empty(ventra_stdspec_sftp_public_key)
+// Phase 4 hybrid — preagg user gated symmetrically. Both stdspec_ready and
+// preagg_ready can be true at the same time (intentional during the dual-run
+// reconciliation window) — they own distinct home directories so they never
+// collide on a path.
+var preagg_ready = enable_sftp && enable_ventra_preagg && !empty(ventra_preagg_sftp_public_key)
 
 resource storage 'Microsoft.Storage/storageAccounts@2024-01-01' = {
   name: name
@@ -368,6 +380,43 @@ resource ventraStdspecSftpUser 'Microsoft.Storage/storageAccounts/localUsers@202
   }
 }
 
+// Phase 4 hybrid — Ventra pre-aggregated SFTP local user.
+//
+// Mirrors the legacy 'ventra' user from PR #54 but with a dedicated home
+// directory and SSH key. Reasons to add this user instead of just renaming:
+//   - Co-existence with the legacy user during the transition window. H14
+//     cuts the pre-agg pipeline over to this user; deleting the legacy user
+//     happens AFTER Ventra confirms they've switched their config.
+//   - SSH key isolation from the stdspec path — key rotation of one user
+//     does not require coordinating with the other.
+//
+// No PHI on this path (Ventra aggregates at source per ADR-006), so the
+// retention follows the standard 90-day vendor-inbound lifecycle rule
+// (handled by the broad ``delete-vendor-inbound-after-N-days`` rule below;
+// no separate lifecycle override needed).
+resource ventraPreaggSftpUser 'Microsoft.Storage/storageAccounts/localUsers@2024-01-01' = if (preagg_ready) {
+  parent: storage
+  name: 'ventra-preagg'
+  properties: {
+    homeDirectory: 'vendor-inbound/ventra/preagg'
+    sshAuthorizedKeys: [
+      {
+        description: 'Ventra pre-aggregated (no-PHI) SFTP key — rotate quarterly via KV; separate from ventra-stdspec key by design'
+        key: ventra_preagg_sftp_public_key
+      }
+    ]
+    permissionScopes: [
+      {
+        permissions: 'rwcd'
+        service: 'blob'
+        resourceName: 'vendor-inbound'
+      }
+    ]
+    hasSshPassword: false
+    hasSharedKey: false
+  }
+}
+
 @description('Vendor-storage account resource ID.')
 output storage_id string = storage.id
 
@@ -385,6 +434,12 @@ output ventra_stdspec_sftp_connection string = stdspec_ready ? '${storage.name}.
 
 @description('Phase 4 hybrid — whether the stdspec local user was provisioned in this deployment. Downstream modules gate their own provisioning on this.')
 output stdspec_ready bool = stdspec_ready
+
+@description('Phase 4 hybrid — full SFTP connection string for the Ventra pre-aggregated user. Empty when preagg is disabled. Pass this to Ventra via secure channel.')
+output ventra_preagg_sftp_connection string = preagg_ready ? '${storage.name}.${storage.name}.blob.${environment().suffixes.storage}:22 (user: ventra-preagg, path: /vendor-inbound/ventra/preagg/)' : ''
+
+@description('Phase 4 hybrid — whether the preagg local user was provisioned in this deployment. Downstream modules (Event Grid filter, Container App Job) gate on this.')
+output preagg_ready bool = preagg_ready
 
 @description('vendor-inbound container name.')
 output vendor_inbound_container_name string = vendorInboundContainer.name
