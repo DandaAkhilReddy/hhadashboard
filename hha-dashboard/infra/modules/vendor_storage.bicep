@@ -79,8 +79,20 @@ param vendor_lifecycle_delete_days int = 90
 param enable_sftp bool = false
 
 @secure()
-@description('Ventra SFTP public SSH key (full content of an OpenSSH-format public key file). Only used when enable_sftp is true. Rotated quarterly via KV.')
+@description('Ventra SFTP public SSH key (full content of an OpenSSH-format public key file). Only used when enable_sftp is true. Rotated quarterly via KV. NOTE: this is the legacy single-user key from PR #54; the hybrid pipeline (Phase 4) uses ventra_stdspec_sftp_public_key + ventra_preagg_sftp_public_key instead. The legacy user stays for backward compatibility until the cutover in H14.')
 param ventra_sftp_public_key string = ''
+
+@description('Phase 4 hybrid — enable the row-level Standard Spec SFTP user. This is the PHI-bearing path; provision only when Ventra is ready to push and the V15 denylist + PHI-safety infrastructure is deployed. Creates the ventra-stdspec local user with homeDirectory = vendor-inbound/ventra/stdspec.')
+param enable_ventra_stdspec bool = false
+
+@secure()
+@description('Phase 4 hybrid — Ventra SSH public key for the stdspec (row-level / PHI-bearing) SFTP user. Separate from ventra_sftp_public_key by design: rotated independently, scoped strictly to vendor-inbound/ventra/stdspec/, and key compromise of the stdspec path does NOT expose the preagg path. Stored in KV as ventra-stdspec-sftp-public-key.')
+param ventra_stdspec_sftp_public_key string = ''
+
+@description('Days after which blobs under vendor-inbound/ventra/stdspec/ auto-delete. Defaults to 30 (vs 90 for preagg) — PHI minimization per ADR-001. 0 disables.')
+@minValue(0)
+@maxValue(90)
+param vendor_stdspec_lifecycle_delete_days int = 30
 
 @description('Deployer workstation IP for the network ACL allowlist. Only used in public-access mode.')
 param deployer_workstation_ip string = ''
@@ -93,6 +105,10 @@ param tags object = {}
 
 var private_mode = !empty(pe_subnet_id)
 var sftp_ready = enable_sftp && !empty(ventra_sftp_public_key)
+// Phase 4 hybrid — stdspec user requires (a) SFTP service on, (b) the toggle
+// flipped, and (c) Ventra's public key supplied. Any missing piece skips the
+// local-user resource — Bicep ``if (...)`` resolves at compile-time.
+var stdspec_ready = enable_sftp && enable_ventra_stdspec && !empty(ventra_stdspec_sftp_public_key)
 
 resource storage 'Microsoft.Storage/storageAccounts@2024-01-01' = {
   name: name
@@ -194,15 +210,46 @@ resource vendorDeadletterContainer 'Microsoft.Storage/storageAccounts/blobServic
   }
 }
 
-// Lifecycle: auto-delete vendor-inbound + vendor-quarantine after
-// vendor_lifecycle_delete_days. vendor-deadletter is excluded by design
+// Lifecycle: auto-delete vendor-inbound + vendor-quarantine after their
+// respective retention windows. vendor-deadletter is excluded by design
 // (operator-triage only).
+//
+// Three rules:
+//   1. delete-vendor-stdspec-after-N-days  — narrowest prefix; runs FIRST
+//      so PHI-bearing rows land their 30-day window before the broader
+//      90-day rule would apply. Lifecycle policies evaluate rules in
+//      definition order; longest-prefix-wins is NOT automatic.
+//   2. delete-vendor-inbound-after-N-days  — broader; catches preagg and
+//      anything Ventra writes outside the stdspec subtree.
+//   3. delete-vendor-quarantine-after-N-days — quarantine triage window.
 resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2024-01-01' = if (vendor_lifecycle_delete_days > 0) {
   parent: storage
   name: 'default'
   properties: {
     policy: {
       rules: [
+        {
+          name: 'delete-vendor-stdspec-after-N-days'
+          enabled: vendor_stdspec_lifecycle_delete_days > 0
+          type: 'Lifecycle'
+          definition: {
+            filters: {
+              blobTypes: [
+                'blockBlob'
+              ]
+              prefixMatch: [
+                'vendor-inbound/ventra/stdspec/'
+              ]
+            }
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterModificationGreaterThan: vendor_stdspec_lifecycle_delete_days
+                }
+              }
+            }
+          }
+        }
         {
           name: 'delete-vendor-inbound-after-N-days'
           enabled: true
@@ -255,6 +302,10 @@ resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2024-01
 // Ventra SFTP local user — only provisioned when enable_sftp AND public key
 // is supplied. Scope is strictly the home directory; rwcd within it, no
 // access to vendor-quarantine or vendor-deadletter.
+//
+// LEGACY (pre-Phase-4): single user 'ventra' with home dir vendor-inbound/ventra.
+// Stays for backward compatibility until H14 cuts the pre-agg pipeline over to
+// the dedicated 'ventra-preagg' user.
 resource ventraSftpUser 'Microsoft.Storage/storageAccounts/localUsers@2024-01-01' = if (sftp_ready) {
   parent: storage
   name: 'ventra'
@@ -264,6 +315,45 @@ resource ventraSftpUser 'Microsoft.Storage/storageAccounts/localUsers@2024-01-01
       {
         description: 'Ventra production SFTP key — rotate quarterly via KV'
         key: ventra_sftp_public_key
+      }
+    ]
+    permissionScopes: [
+      {
+        permissions: 'rwcd'
+        service: 'blob'
+        resourceName: 'vendor-inbound'
+      }
+    ]
+    hasSshPassword: false
+    hasSharedKey: false
+  }
+}
+
+// Phase 4 hybrid — Ventra Standard-Spec SFTP local user.
+//
+// Threat model deltas vs the legacy 'ventra' user:
+//   - PHI bearer: Ventra writes row-level Invoice + Guarantor CSVs here.
+//   - Key compromise containment: separate SSH key from preagg path, so a
+//     key leak only affects the row-level inbound — preagg keeps running.
+//   - Scope: strictly vendor-inbound/ventra/stdspec/<YYYY-MM-DD>/. The
+//     homeDirectory pins it; the permissionScope on vendor-inbound is the
+//     full container but the user's path resolution is rooted at the home
+//     dir, so they cannot list or write outside it via standard SFTP clients.
+//   - Retention: covered by a 30-day lifecycle rule below (vs 90-day for
+//     the rest of vendor-inbound) — PHI minimization per ADR-001.
+//
+// The Container App Job processing this user's drops (caj-ventra-ingest-stdspec,
+// added in H5) strips PHI before any column reaches the DB. Raw blobs land
+// here, get aggregated in-memory by the job, then auto-delete on day 30.
+resource ventraStdspecSftpUser 'Microsoft.Storage/storageAccounts/localUsers@2024-01-01' = if (stdspec_ready) {
+  parent: storage
+  name: 'ventra-stdspec'
+  properties: {
+    homeDirectory: 'vendor-inbound/ventra/stdspec'
+    sshAuthorizedKeys: [
+      {
+        description: 'Ventra Standard-Spec (row-level / PHI) SFTP key — rotate quarterly via KV; separate from ventra-preagg key by design'
+        key: ventra_stdspec_sftp_public_key
       }
     ]
     permissionScopes: [
@@ -289,6 +379,12 @@ output blob_endpoint string = storage.properties.primaryEndpoints.blob
 
 @description('SFTP endpoint primary URL — only meaningful when enable_sftp is true. Ventra connects to this hostname:22 with the local-user credentials.')
 output sftp_endpoint string = enable_sftp ? '${storage.name}.blob.${environment().suffixes.storage}' : ''
+
+@description('Phase 4 hybrid — full SFTP connection string for the Ventra Standard-Spec (row-level) user. Empty when stdspec is disabled. Pass this to Ventra via secure channel.')
+output ventra_stdspec_sftp_connection string = stdspec_ready ? '${storage.name}.${storage.name}.blob.${environment().suffixes.storage}:22 (user: ventra-stdspec, path: /vendor-inbound/ventra/stdspec/)' : ''
+
+@description('Phase 4 hybrid — whether the stdspec local user was provisioned in this deployment. Downstream modules gate their own provisioning on this.')
+output stdspec_ready bool = stdspec_ready
 
 @description('vendor-inbound container name.')
 output vendor_inbound_container_name string = vendorInboundContainer.name
