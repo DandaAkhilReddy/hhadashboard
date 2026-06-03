@@ -107,10 +107,27 @@ FORBIDDEN_COLUMN_EXACT: frozenset[str] = frozenset(
     }
 )
 
+# Explicit allowlist for aggregate column names that LOOK like PHI by
+# pattern but are confirmed Tier-A aggregates by ADR-001 schema review.
+# These bypass both the exact denylist and the regex patterns. Every
+# entry here requires a sign-off from the data-classification reviewer:
+#
+#   ``patient_refunds``  — aggregate $ amount refunded to patients
+#                          across the (date, facility, payer) group.
+#                          No patient identifier; just a sum.
+#
+# Adding to this set is a one-way door — undoing it would re-classify a
+# column as PHI and require migration. Treat as security-critical.
+KNOWN_SAFE_AGGREGATE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "patient_refunds",
+    }
+)
+
 # Regex patterns to catch unknown variants. Each pattern is anchored on
 # the full normalized column name (no partial matches against legitimate
 # names like ``payer_class`` or ``facility_no``). The matcher applies
-# these AFTER the exact set misses.
+# these AFTER the exact set misses AND after the allowlist bypass.
 FORBIDDEN_COLUMN_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Anything starting with patient_, guarantor_, subscriber_ that's not
     # already in the exact list above.
@@ -147,8 +164,17 @@ def is_forbidden_column(name: str) -> bool:
     against every column the parsers see — once per file at parse-time
     (V15 layer 1: pre-strip sanity) and again per record after strip
     (V15 layer 2: post-strip assertion).
+
+    Resolution order:
+      1. Known-safe aggregate allowlist (``patient_refunds``, etc.) →
+         not forbidden.
+      2. Exact denylist match → forbidden.
+      3. Regex pattern match → forbidden.
+      4. Otherwise → not forbidden.
     """
     norm = _normalize_column(name)
+    if norm in KNOWN_SAFE_AGGREGATE_COLUMNS:
+        return False
     if norm in FORBIDDEN_COLUMN_EXACT:
         return True
     return any(pattern.match(norm) for pattern in FORBIDDEN_COLUMN_PATTERNS)
@@ -282,6 +308,7 @@ def scrub_record(record: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "FORBIDDEN_COLUMN_EXACT",
     "FORBIDDEN_COLUMN_PATTERNS",
+    "KNOWN_SAFE_AGGREGATE_COLUMNS",
     "PHI_VALUE_PATTERNS",
     "assert_no_phi_columns",
     "is_forbidden_column",
