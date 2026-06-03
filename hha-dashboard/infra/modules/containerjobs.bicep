@@ -89,6 +89,19 @@ param app_insights_connection_string string = ''
 @description('Ops recipient list for ventra_ingest notifications (success / quarantine / failure / incident). Comma-separated email addresses.')
 param ventra_ops_email_recipients string = 'areddy@hhamedicine.com'
 
+// ---------------------------------------------------------------------------
+// Phase 4 hybrid — ventra_ingest_stdspec (row-level / PHI-bearing path)
+// ---------------------------------------------------------------------------
+
+@description('Phase 4 hybrid — enable the row-level Standard Spec Container Apps Job. Gated separately from enable_ventra_ingest_job so the pre-agg path can stay live while the stdspec image is being baked. Requires enable_vendor_storage + the stdspec queue in vendor_eventgrid.bicep.')
+param enable_ventra_ingest_stdspec_job bool = false
+
+@description('Phase 4 hybrid — container image for ventra_ingest_stdspec. Separate image from the pre-aggregated job because the source tree lives in jobs/ventra_ingest_stdspec/ with PHI-safety infrastructure (V15 denylist, structlog scrubber, SafeMessageError base). Replace placeholder with acrhha{env}.azurecr.io/ventra-ingest-stdspec:{sha} once CI image-push lands.')
+param ventra_ingest_stdspec_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
+@description('Phase 4 hybrid — KEDA queue this job binds to. Must match the stdspec_queue_name output from vendor_eventgrid.bicep.')
+param stdspec_manifest_queue_name string = 'q-ventra-stdspec-manifests'
+
 @description('Tags applied to every resource.')
 param tags object = {}
 
@@ -362,6 +375,110 @@ resource ventraIngestJob 'Microsoft.App/jobs@2024-03-01' = if (enable_ventra_ing
   }
 }
 
+// =========================================================================
+// Phase 4 hybrid — ventra_ingest_stdspec (row-level / PHI-bearing path)
+//
+// Mirrors the pre-aggregated ventraIngestJob above with deltas:
+//   - Bound to q-ventra-stdspec-manifests (separate queue, separate
+//     KEDA scaler — backpressure on one path doesn't starve the other)
+//   - replicaTimeout: 900s (vs 600s for pre-agg) — row-level parsing +
+//     in-memory aggregation has higher per-drop cost
+//   - INGEST_PATH=stdspec env var: the job's main.py branches on this to
+//     load the stdspec parsers + V15 denylist + PHI-safety logging stack
+//   - container/job names suffixed with -stdspec for cross-job correlation
+//   - Resources still 0.5 vCPU / 1 GiB — aggregation is streamed, not
+//     slurped, so memory stays bounded even on big drops
+//
+// Authentication + MI pattern identical to ventraIngestJob — rbac.bicep
+// assigns Storage Blob Data Contributor + Queue Message Processor + KV
+// Secrets User to this job's principal in the same pattern.
+// =========================================================================
+
+resource ventraIngestStdspecJob 'Microsoft.App/jobs@2024-03-01' = if (enable_ventra_ingest_stdspec_job) {
+  name: 'job-ventra-ingest-stdspec-${env_name_prefix}'
+  location: location
+  tags: tags
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    environmentId: env.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Event'
+      replicaTimeout: 900
+      replicaRetryLimit: 3
+      eventTriggerConfig: {
+        replicaCompletionCount: 1
+        parallelism: 1
+        scale: {
+          minExecutions: 0
+          maxExecutions: 5
+          pollingInterval: 30
+          rules: [
+            {
+              name: 'q-ventra-stdspec-manifests-trigger'
+              type: 'azure-queue'
+              metadata: {
+                accountName: vendor_storage_account_name
+                queueName: stdspec_manifest_queue_name
+                queueLength: '1'
+              }
+              auth: [
+                {
+                  secretRef: 'vendor-storage-connection-string'
+                  triggerParameter: 'connection'
+                }
+              ]
+            }
+          ]
+        }
+      }
+      secrets: [
+        {
+          name: 'database-url'
+          value: database_url
+        }
+        {
+          name: 'app-insights-connection'
+          value: app_insights_connection_string
+        }
+        {
+          name: 'vendor-storage-connection-string'
+          value: enable_ventra_ingest_stdspec_job ? 'DefaultEndpointsProtocol=https;AccountName=${vendorStorageRef!.name};AccountKey=${vendorStorageRef!.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}' : ''
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'ventra-ingest-stdspec'
+          image: ventra_ingest_stdspec_image
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            { name: 'ENV_NAME', value: env_name_prefix }
+            { name: 'INGEST_PATH', value: 'stdspec' }
+            { name: 'STORAGE_ACCOUNT', value: vendor_storage_account_name }
+            { name: 'MANIFEST_QUEUE_NAME', value: stdspec_manifest_queue_name }
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
+            { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'app-insights-connection' }
+            { name: 'AZURE_COMMUNICATION_ENDPOINT', value: azure_communication_endpoint }
+            { name: 'AZURE_COMMUNICATION_SENDER', value: azure_communication_sender }
+            { name: 'ALERT_EMAIL_FROM', value: azure_communication_sender }
+            { name: 'ALERT_EMAIL_TO_OPS', value: ventra_ops_email_recipients }
+            // Phase 4 stdspec marker — the job uses this to set the
+            // source_system column when writing to fact tables.
+            { name: 'SOURCE_SYSTEM_TAG', value: 'VENTRA_FL_STDSPEC_AGG' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
 @description('Container Apps environment resource ID — used by main.bicep to wire additional Job resources later.')
 output env_id string = env.id
 
@@ -385,3 +502,9 @@ output ventra_ingest_job_id string = enable_ventra_ingest_job ? ventraIngestJob!
 
 @description('ventra_ingest job principal ID (System-Assigned MI). Wire to Storage Blob Data Contributor on vendor-storage + Storage Queue Data Message Processor on q-ventra-manifests + Key Vault Secrets User on the KV via rbac.bicep.')
 output ventra_ingest_principal_id string = enable_ventra_ingest_job ? ventraIngestJob!.identity.principalId : ''
+
+@description('Phase 4 hybrid — ventra_ingest_stdspec job resource ID. Empty when disabled.')
+output ventra_ingest_stdspec_job_id string = enable_ventra_ingest_stdspec_job ? ventraIngestStdspecJob!.id : ''
+
+@description('Phase 4 hybrid — ventra_ingest_stdspec job principal ID (System-Assigned MI). Same role assignments needed as ventra_ingest, but scoped to the stdspec queue.')
+output ventra_ingest_stdspec_principal_id string = enable_ventra_ingest_stdspec_job ? ventraIngestStdspecJob!.identity.principalId : ''
