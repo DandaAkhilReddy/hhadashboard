@@ -104,6 +104,70 @@ FORBIDDEN_COLUMN_EXACT: frozenset[str] = frozenset(
         "url",
         "face_photo",
         "fingerprint",
+        # -- REAL Ventra Standard Data Extract columns (confirmed 2026-06-15) --
+        # The defense-in-depth denylist below backs the per-file ALLOWLIST
+        # which is now the primary mechanism (keep_safe_columns). These are
+        # the actual PHI columns Ventra ships in Invoice / ChargeLines /
+        # Guarantor, normalized (lowercased, spaces/hyphens -> underscores).
+        #
+        # Invoice — patient identity (Pat* family + the catch-all regex below).
+        "patmi",
+        "patbirthdate",
+        "patsex",
+        "pataddress",
+        "patcity",
+        "patstate",
+        "patzip",
+        "patphone",
+        "patfname",
+        "patlname",
+        "patientstatus",
+        # Invoice — account / encounter / claim identifiers.
+        "hospacctno",
+        "depk",
+        "icn",
+        "statementaccount",
+        # Invoice — insurance member identifiers (policy + group are PHI).
+        "primarypolicyid",
+        "secondarypolicyid",
+        "tertiarypolicyid",
+        "primarygroup",
+        "secondarygroup",
+        "tertiarygroup",
+        # Invoice — encounter timing (patient-level).
+        "timein",
+        "timeout",
+        "timemd",
+        "dischargedate",
+        "patientbirthdate",
+        # ChargeLines — procedure + diagnosis (CPT/ICD are PHI per HIPAA).
+        "cpt",
+        "cpt_description",
+        "modifiers",
+        # Guarantor — the whole file is patient/guarantor PHI; bare-name
+        # columns (FirstName, not guarantor_first_name) need explicit entries
+        # plus the ^guarantor.+$ regex below.
+        "firstname",
+        "middlename",
+        "lastname",
+        "fullname",
+        "streetaddrline1",
+        "streetaddrline2",
+        "homephone",
+        "cellphone",
+        "emailaddress",
+        "employer",
+        # Guarantor bare address / demographic columns. Safe to deny — HHA
+        # keeps NO bare ``city``/``state``/``zip``/``sex``/``dateofbirth``
+        # column (the Facility file has no state column; patient state is
+        # ``PatState``). The allowlist already drops these by default; these
+        # entries make the denylist tripwire catch them too.
+        "city",
+        "state",
+        "zip",
+        "zipcode",
+        "sex",
+        "dateofbirth",
     }
 )
 
@@ -129,21 +193,35 @@ KNOWN_SAFE_AGGREGATE_COLUMNS: frozenset[str] = frozenset(
 # names like ``payer_class`` or ``facility_no``). The matcher applies
 # these AFTER the exact set misses AND after the allowlist bypass.
 FORBIDDEN_COLUMN_PATTERNS: tuple[re.Pattern[str], ...] = (
-    # Anything starting with patient_, guarantor_, subscriber_ that's not
-    # already in the exact list above.
-    re.compile(r"^patient_.+$"),
-    re.compile(r"^guarantor_.+$"),
-    re.compile(r"^subscriber_.+$"),
-    # Common email/phone/address variants Ventra might rename.
-    re.compile(r".*_email(?:_address)?$"),
-    re.compile(r".*_phone(?:_number)?$"),
-    re.compile(r".*_ssn$"),
-    re.compile(r".*_dob$"),
-    re.compile(r".*_(?:home|cell|mobile|work)_phone$"),
+    # Patient / guarantor / subscriber families — NO underscore required, so
+    # both the guessed ``patient_dob`` form AND Ventra's real ``PatBirthDate``
+    # / ``GuarantorFirstName`` forms are caught after normalization.
+    re.compile(r"^patient.+$"),
+    re.compile(r"^guarantor.+$"),
+    re.compile(r"^subscriber.+$"),
+    # Ventra Invoice's ``Pat*`` patient-identity family: ``patfname``,
+    # ``patbirthdate``, ``pataddress``, etc. Pure-letters-after-``pat`` so it
+    # never collides with ``patient_refunds`` (has an underscore -> excluded)
+    # or ``payer_class`` (starts ``pay``).
+    re.compile(r"^pat[a-z]+$"),
+    # Guarantor / patient employer + address families (bare-name forms).
+    re.compile(r"^employer.*$"),
+    re.compile(r"^streetaddr.*$"),
+    # Diagnosis (ICD9_n / ICD10_n) — diagnosis codes are PHI.
+    re.compile(r"^icd\d+_\d+$"),
+    # Insurance member identifiers.
+    re.compile(r".*policyid$"),
+    re.compile(r"^(?:primary|secondary|tertiary)group$"),
+    # Common email/phone/ssn/dob variants Ventra might rename.
+    re.compile(r".*_?email(?:_?address)?$"),
+    re.compile(r".*_?phone(?:_?number)?$"),
+    re.compile(r".*_?ssn$"),
+    re.compile(r".*_?dob$"),
+    re.compile(r".*_?(?:home|cell|mobile|work)_?phone$"),
     # Name fields that are not the physician name we DO allow.
-    # ``physician_name`` is NOT forbidden — it's a Tier-B directory field.
-    # Other ``*_name`` variants are.
-    re.compile(r"^(?:patient|guarantor|subscriber|member)_.*name$"),
+    # ``DocFName``/``DocLName`` (physician) are NOT forbidden — Tier-B
+    # directory. Patient/guarantor/subscriber/member name variants are.
+    re.compile(r"^(?:patient|guarantor|subscriber|member).*name$"),
 )
 
 
@@ -210,6 +288,49 @@ def strip_phi_columns(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
             continue
         out[key] = value
     return out, stripped
+
+
+def keep_safe_columns(
+    row: dict[str, Any], allowlist: frozenset[str]
+) -> tuple[dict[str, Any], list[str]]:
+    """ALLOWLIST strip — keep ONLY the explicitly-safe columns; drop the rest.
+
+    This is the PRIMARY PHI-removal mechanism for the row-level pipeline,
+    replacing the denylist-first ``strip_phi_columns``. For a file that is
+    known to carry PHI (Ventra's row-level Standard Data Extract), the
+    correct security posture is keep-known-safe / drop-everything-else:
+    a NEW column Ventra adds next quarter is dropped by default, never
+    leaked, even if our denylist has not been updated for it.
+
+    The ``allowlist`` is the set of normalized column names a given file's
+    parser declares safe (its model fields + any transient join key). Every
+    key in ``row`` is normalized and checked:
+      - in allowlist  -> kept (original key preserved in the output)
+      - not in allowlist -> dropped, name recorded in the returned list
+
+    A defensive cross-check runs on the kept set: if any KEPT column is on
+    the forbidden denylist, that is a configuration error (a PHI column was
+    mistakenly allowlisted) and raises ``PHILeakError`` immediately rather
+    than letting it through.
+
+    Returns ``(kept_dict, dropped_column_names)``. The original ``row`` is
+    not mutated. The dropped-names list feeds a telemetry COUNT only — never
+    the values.
+    """
+    if not isinstance(row, dict):
+        raise ValueError(
+            f"keep_safe_columns expects a dict; got {type(row).__name__}"
+        )
+    kept: dict[str, Any] = {}
+    dropped: list[str] = []
+    for key, value in row.items():
+        if _normalize_column(key) in allowlist:
+            kept[key] = value
+        else:
+            dropped.append(_normalize_column(key))
+    # Defensive: an allowlisted column must never also be on the denylist.
+    assert_no_phi_columns(kept)
+    return kept, dropped
 
 
 def assert_no_phi_columns(row: dict[str, Any]) -> None:
@@ -312,6 +433,7 @@ __all__ = [
     "PHI_VALUE_PATTERNS",
     "assert_no_phi_columns",
     "is_forbidden_column",
+    "keep_safe_columns",
     "scrub_record",
     "scrub_value",
     "strip_phi_columns",
