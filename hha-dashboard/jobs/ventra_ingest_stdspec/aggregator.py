@@ -1,40 +1,57 @@
-"""In-memory aggregator — invoice rows -> 3 fact-table aggregate sets.
+"""In-memory multi-file join + aggregation for the row-level pipeline.
 
-Streamed input from ``parsers.parse_invoice`` is fed one row at a time
-into ``Aggregator.process_invoice_row``. Internal defaultdicts accumulate
-by the natural keys of the three fact tables, then ``to_*_rows`` methods
-emit immutable dataclass instances ready for the writer (H11).
+Rewritten 2026-06-16 (R4) against Ventra's real 5-file spec. The pipeline
+ingests Invoice + ChargeLines + Physician + Facility + TransactionsAlt and
+must JOIN them in memory before aggregating to the three fact-table grains.
 
-Memory profile:
-  - Bounded by the cardinality of (date, facility, payer) +
-    (snapshot_date, facility, bucket) + (month, npi, facility), NOT by
-    row count. For a year of FL data across 7 sites + ~50 physicians +
-    5 payer classes:
-      collections:   365 * 7 * 5    = 12,775 entries
-      ar_snapshot:   1 * 7 * 6       =     42 entries
-      physician_mo:  12 * 50 * 7     =  4,200 entries
-    Total ~17k Decimal sums + counters. Trivial memory footprint.
-  - Even on a multi-million-row month of claims, the accumulator stays
-    bounded — only the keys grow, not the values.
+Join model (from the spec's "File Joins" tab):
+  Invoice.InvoiceNo == ChargeLines.InvoiceNo == TransactionsAlt.InvoiceNo
+  Invoice.FacilityNo == Facility.FacilityNo
+  ChargeLines.PrimaryPhysicianNPI == Physician.NPI
 
-PHI-safety contract:
-  - The aggregator NEVER stores raw row content. Only the aggregation
-    keys (already non-PHI after the parser's strip layer) and the
-    Decimal sums + counters.
-  - V15 layer 2 (post-strip assertion) runs on every row that arrives:
-    if the InvoiceRow somehow carries a forbidden attribute (shouldn't
-    be possible given Pydantic's model definition, but defensive),
-    raise PHILeakError immediately.
-  - Aggregate output dataclasses contain only the columns the fact tables
-    accept. PHI cannot reach the writer through this layer.
+Because the files stream independently and in any order, the aggregator
+accumulates per-invoice partial state keyed by the transient ``InvoiceNo``
+(never persisted), then ``emit(facility_map)`` performs the join +
+facility resolution + aggregation and returns the three aggregate lists.
 
-Net-revenue formula (locked 2026-05-25 pending Ventra confirmation):
+Derivations:
+  fact_collections_daily (date, site_id, payer):
+    gross_charges        <- sum ChargeLines.ChargeAmt
+    payments_received    <- sum TransactionsAlt where TranType=Payment
+    contractual_adjustments <- TranType=Adjustment & comment~contract
+    write_offs           <- TranType=Adjustment & comment~bad debt/write
+    payer_refunds        <- TranType=Refund & TranSource=Insurance
+    patient_refunds      <- TranType=Refund & TranSource=Patient
+    net_revenue          = payments_received - payer_refunds - patient_refunds
+    date  = the charge/transaction PostingDate (operational, NOT DOS/PHI)
+    payer = normalize(Invoice.PrimaryInsClass) for charges;
+            normalize(TransactionsAlt.InsuranceClass) for payments
+
+  fact_ar_snapshot (drop_date, site_id, bucket):
+    per invoice: open_balance = sum(charges) - sum(payments+adjustments+writeoffs)
+    age_days = drop_date - max(charge PostingDate for that invoice)
+    bucket via classify_aging_bucket(age_days, open_balance)
+
+  fact_revenue_by_physician_mo (month, npi, site_id):
+    encounters_count  = distinct InvoiceNo count per (month, npi, site)
+    total_rvu/work_rvu <- sum ChargeLines.RVU/WorkRVU
+    revenue_attributed <- payments attributed to the invoices in the group
+    month = first-of-month(charge PostingDate)
+
+Facility resolution: every aggregate's ``facility_no`` is the HHA
+``masters.sites.id`` (1-7), resolved from the Ventra ``FacilityNo``
+(2284-2290) via the ``facility_map`` passed to ``emit()`` (loaded from
+``dims.facility_codes`` by ``validate_fl_only`` in R5). A Ventra FacilityNo
+absent from the map raises — but ``validate_fl_only`` runs first and
+quarantines unmapped drops (V8), so ``emit`` should never hit that.
+
+PHI-safety: the aggregator stores only the transient InvoiceNo join key +
+aggregation keys + Decimal sums + counters. No raw row content; no PHI
+column. The emitted aggregates carry only fact-table columns.
+
+Net-revenue formula (locked 2026-05-25, CFO + Sandy sign-off):
   net_revenue = payments_received - payer_refunds - patient_refunds
-
-The CFO + Sandy Collins signed off on this formula for the working
-session call. If Ventra's reply asks for a different definition, this
-function is the single place to update — every downstream consumer
-reads net_revenue from the aggregate, never recomputes.
+Single place to update if Ventra's reply changes the definition.
 """
 
 from __future__ import annotations
@@ -44,23 +61,25 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
-from .exceptions import ValidationError
-from .parsers import GuarantorRow, InvoiceRow
-from .phi import assert_no_phi_columns
+from .parsers.standard_spec import (
+    ChargeLineRow,
+    FacilityRow,
+    InvoiceRow,
+    PhysicianRow,
+    TransactionRow,
+    normalize_payer_class,
+)
 
 # ============================================================================
-# Aggregate dataclasses — writer inputs
+# Aggregate dataclasses — writer inputs (unchanged from H9 / writer contract)
 # ============================================================================
 
 
 @dataclass(frozen=True, slots=True)
 class CollectionsAggregate:
-    """One row of fact_collections_daily.
-
-    Natural key: (date, facility_no, payer_class). source_system is set
-    by the writer to VENTRA_FL_STDSPEC_AGG; state is set by the DB
-    default to FL.
-    """
+    """One row of fact_collections_daily. Natural key (date, facility_no,
+    payer_class). source_system set by the writer to VENTRA_FL_STDSPEC_AGG;
+    state set by the DB default to FL. ``facility_no`` is the HHA site_id."""
 
     date: date
     facility_no: int
@@ -76,11 +95,8 @@ class CollectionsAggregate:
 
 @dataclass(frozen=True, slots=True)
 class ArSnapshotAggregate:
-    """One row of fact_ar_snapshot.
-
-    Natural key: (snapshot_date, facility_no, aging_bucket). snapshot_date
-    is the drop_date (the day we processed the invoice file).
-    """
+    """One row of fact_ar_snapshot. Natural key (snapshot_date, facility_no,
+    aging_bucket). ``facility_no`` is the HHA site_id."""
 
     snapshot_date: date
     facility_no: int
@@ -90,11 +106,8 @@ class ArSnapshotAggregate:
 
 @dataclass(frozen=True, slots=True)
 class PhysicianMonthlyAggregate:
-    """One row of fact_revenue_by_physician_mo.
-
-    Natural key: (month, physician_npi, facility_no). ``month`` is the
-    first-of-month for the invoice's service_date.
-    """
+    """One row of fact_revenue_by_physician_mo. Natural key (month,
+    physician_npi, facility_no). ``facility_no`` is the HHA site_id."""
 
     month: date
     physician_npi: str
@@ -114,8 +127,7 @@ def classify_aging_bucket(days_since_service: int, outstanding_amount: Decimal) 
     """Return the AR aging bucket label per the standard 30-day bands.
 
     The ``credit`` bucket catches negative outstanding amounts (payments
-    that overshot the charge — patient refunds owed), regardless of
-    days. Otherwise the band is selected by days_since_service.
+    that overshot the charge — refunds owed), regardless of days.
     """
     if outstanding_amount < 0:
         return "credit"
@@ -131,165 +143,249 @@ def classify_aging_bucket(days_since_service: int, outstanding_amount: Decimal) 
 
 
 def _first_of_month(d: date) -> date:
-    """Return the first-of-month date for ``d``.
-
-    Matches the ``month = date_trunc('month', month)::date`` CHECK
-    constraint on fact_revenue_by_physician_mo.
-    """
+    """Return the first-of-month date for ``d`` — matches the
+    fact_revenue_by_physician_mo month CHECK."""
     return date(d.year, d.month, 1)
 
 
 # ============================================================================
-# Aggregator
+# Transaction classification
+# ============================================================================
+
+
+def _classify_transaction(row: TransactionRow) -> tuple[str, Decimal]:
+    """Map a transaction to a collections bucket + a non-negative magnitude.
+
+    Returns ``(bucket, amount)`` where bucket is one of:
+      'payments_received' | 'contractual_adjustments' | 'write_offs'
+      | 'payer_refunds' | 'patient_refunds' | 'ignore'
+    Amount is ``abs(tran_amt)`` (the fact table stores non-negative
+    magnitudes; sign convention in the bucket is fixed by the column).
+
+    Transfers and unknown types map to 'ignore' (internal AR movement,
+    net-zero to collections).
+    """
+    ttype = (row.tran_type or "").strip().lower()
+    comment = (row.tran_comment or "").strip().lower()
+    source = (row.tran_source or "").strip().lower()
+    amt = abs(row.tran_amt)
+
+    if ttype == "payment":
+        return "payments_received", amt
+    if ttype == "refund":
+        if "patient" in source:
+            return "patient_refunds", amt
+        return "payer_refunds", amt
+    if ttype == "adjustment":
+        if "bad debt" in comment or "write" in comment or "writeoff" in comment:
+            return "write_offs", amt
+        # Contract adjustments + any other adjustment default to contractual.
+        return "contractual_adjustments", amt
+    # Transfer / Unknown -> net-zero internal movement.
+    return "ignore", amt
+
+
+# ============================================================================
+# Per-invoice transient accumulators (keyed by InvoiceNo — never persisted)
 # ============================================================================
 
 
 @dataclass(slots=True)
-class _CollectionsAccumulator:
-    """Mutable accumulator for one (date, facility, payer) group."""
+class _InvoiceState:
+    """Partial state for one invoice, joined across the 5 files."""
 
+    ventra_facility_no: int | None = None
+    payer_class: str = "other"  # from Invoice.PrimaryInsClass
     gross_charges: Decimal = Decimal(0)
+    # Field names match the _classify_transaction bucket names so
+    # process_transaction_row can setattr() directly.
     payments_received: Decimal = Decimal(0)
     contractual_adjustments: Decimal = Decimal(0)
     write_offs: Decimal = Decimal(0)
     payer_refunds: Decimal = Decimal(0)
     patient_refunds: Decimal = Decimal(0)
-
-
-@dataclass(slots=True)
-class _ArAccumulator:
-    """Mutable accumulator for one (snapshot_date, facility, bucket) group."""
-
-    outstanding_amount: Decimal = Decimal(0)
-
-
-@dataclass(slots=True)
-class _PhysicianAccumulator:
-    """Mutable accumulator for one (month, npi, facility) group."""
-
-    encounters_count: int = 0
-    total_rvu: Decimal = Decimal(0)
-    total_work_rvu: Decimal = Decimal(0)
-    revenue_attributed: Decimal = Decimal(0)
+    last_posting_date: date | None = None
+    # charge contributions for the physician/collections grain:
+    # list of (posting_date, npi, charge_amt, rvu, work_rvu)
+    charges: list[tuple[date | None, str, Decimal, Decimal, Decimal]] = field(
+        default_factory=list
+    )
+    # transaction contributions: list of (posting_dt, payer_class, bucket, amount)
+    txns: list[tuple[date | None, str, str, Decimal]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class Aggregator:
-    """Streaming accumulator over invoice rows.
+    """Multi-file in-memory join + aggregation.
 
     Usage:
-        agg = Aggregator(drop_date=date(2026, 6, 3))
-        for row in parse_invoice(invoice_bytes):
-            agg.process_invoice_row(row)
-        for grow in parse_guarantor(guarantor_bytes):
-            agg.process_guarantor_row(grow)
-        collections = agg.to_collections_rows()
-        ar_snapshot = agg.to_ar_snapshot_rows()
-        physician_mo = agg.to_physician_monthly_rows()
-        agg.assert_v12_facility_consistency()
+        agg = Aggregator(drop_date=date(2026, 6, 16))
+        for r in parse_invoice(b):       agg.process_invoice_row(r)
+        for r in parse_chargelines(b):   agg.process_chargeline_row(r)
+        for r in parse_transactions(b):  agg.process_transaction_row(r)
+        for r in parse_physician(b):     agg.process_physician_row(r)
+        for r in parse_facility(b):      agg.process_facility_row(r)
+        collections, ar, physician = agg.emit(facility_map)
     """
 
     drop_date: date
-    # Set of facility_no values seen in invoice rows. The orchestrator
-    # uses this for V12 (FL-only check via masters.sites). Guarantor
-    # rows confirm consistency with the invoice set.
-    invoice_facilities: set[int] = field(default_factory=set)
-    guarantor_facilities: set[int] = field(default_factory=set)
-    # Row counters surface in the ingest_run telemetry.
+
+    _invoices: dict[int, _InvoiceState] = field(default_factory=dict)
+    physician_types: dict[str, str] = field(default_factory=dict)
+    ventra_facilities: set[int] = field(default_factory=set)
+
     invoice_rows_consumed: int = 0
-    guarantor_rows_consumed: int = 0
-    phi_columns_stripped_total: int = 0
-    # Internal accumulators. defaultdict(constructor) — each lookup
-    # creates an empty accumulator on first access.
-    _collections: defaultdict[tuple[date, int, str], _CollectionsAccumulator] = field(
-        default_factory=lambda: defaultdict(_CollectionsAccumulator)
-    )
-    _ar: defaultdict[tuple[date, int, str], _ArAccumulator] = field(
-        default_factory=lambda: defaultdict(_ArAccumulator)
-    )
-    _physician: defaultdict[
-        tuple[date, str, int], _PhysicianAccumulator
-    ] = field(default_factory=lambda: defaultdict(_PhysicianAccumulator))
+    chargeline_rows_consumed: int = 0
+    transaction_rows_consumed: int = 0
+    physician_rows_consumed: int = 0
+    facility_rows_consumed: int = 0
+
+    def _invoice(self, invoice_no: int) -> _InvoiceState:
+        st = self._invoices.get(invoice_no)
+        if st is None:
+            st = _InvoiceState()
+            self._invoices[invoice_no] = st
+        return st
+
+    # ---- per-file row processors ----
 
     def process_invoice_row(self, row: InvoiceRow) -> None:
-        """Update all three accumulators from one invoice row.
-
-        V15 layer 2 assertion runs on the row's dump first — defensive
-        against a parser bug or a future Pydantic config change that
-        accidentally lets a PHI field through. Should never fire under
-        the H8 parser, but cheap insurance.
-        """
-        dumped = row.model_dump(mode="python")
-        # The PHI denial layer rejects any forbidden column key. If the
-        # InvoiceRow model ever picks up such a key by accident, this
-        # raises PHILeakError to the orchestrator's incident path.
-        assert_no_phi_columns(dumped)
-
+        """Record the invoice header: facility + payer linkage."""
         self.invoice_rows_consumed += 1
-        self.invoice_facilities.add(row.facility_no)
+        st = self._invoice(row.invoice_no)
+        st.ventra_facility_no = row.facility_no
+        st.payer_class = normalize_payer_class(row.primary_ins_class)
+        self.ventra_facilities.add(row.facility_no)
 
-        # ---- Collections accumulator ----
-        coll_key = (row.service_date, row.facility_no, row.payer_class)
-        cacc = self._collections[coll_key]
-        cacc.gross_charges += row.gross_charges
-        cacc.payments_received += row.payments_received
-        cacc.contractual_adjustments += row.contractual_adjustments
-        cacc.write_offs += row.write_offs
-        cacc.payer_refunds += row.payer_refunds
-        cacc.patient_refunds += row.patient_refunds
-
-        # ---- AR snapshot accumulator ----
-        bucket = classify_aging_bucket(row.days_since_service, row.outstanding_amount)
-        ar_key = (self.drop_date, row.facility_no, bucket)
-        self._ar[ar_key].outstanding_amount += row.outstanding_amount
-
-        # ---- Physician monthly accumulator ----
-        phys_key = (
-            _first_of_month(row.service_date),
-            row.rendering_npi,
-            row.facility_no,
+    def process_chargeline_row(self, row: ChargeLineRow) -> None:
+        """Accumulate charge amount + RVU + billed NPI onto the invoice."""
+        self.chargeline_rows_consumed += 1
+        st = self._invoice(row.invoice_no)
+        st.gross_charges += row.charge_amt
+        st.charges.append(
+            (
+                row.posting_date,
+                (row.primary_physician_npi or "").strip(),
+                row.charge_amt,
+                row.rvu,
+                row.work_rvu,
+            )
         )
-        pacc = self._physician[phys_key]
-        pacc.encounters_count += 1
-        pacc.total_rvu += row.total_rvu
-        pacc.total_work_rvu += row.work_rvu
-        # Revenue attribution = payments_received per encounter line.
-        # An alternative formula (net_revenue distributed across lines)
-        # is documented in the plan; locked at payments_received for v1.
-        pacc.revenue_attributed += row.payments_received
+        if row.posting_date is not None and (
+            st.last_posting_date is None or row.posting_date > st.last_posting_date
+        ):
+            st.last_posting_date = row.posting_date
 
-    def process_guarantor_row(self, row: GuarantorRow) -> None:
-        """Record the guarantor row for V12 cross-file consistency.
+    def process_transaction_row(self, row: TransactionRow) -> None:
+        """Accumulate a payment / adjustment / refund onto the invoice."""
+        self.transaction_rows_consumed += 1
+        st = self._invoice(row.invoice_no)
+        bucket, amt = _classify_transaction(row)
+        if bucket == "ignore":
+            return
+        setattr(st, bucket, getattr(st, bucket) + amt)
+        # Payer for a transaction comes off the transaction's own class,
+        # falling back to the invoice payer if blank.
+        payer = (
+            normalize_payer_class(row.insurance_class)
+            if row.insurance_class.strip()
+            else st.payer_class
+        )
+        tx_date = row.posting_dt or row.bank_deposit_dt
+        st.txns.append((tx_date, payer, bucket, amt))
 
-        Aggregator doesn't consume guarantor data into any fact table —
-        the file is only parsed for V15 sanity. We track facility_no
-        per row so the orchestrator can verify the invoice + guarantor
-        facility sets match (one of V12's checks).
+    def process_physician_row(self, row: PhysicianRow) -> None:
+        """Reference: NPI -> doc type (name not needed for aggregates)."""
+        self.physician_rows_consumed += 1
+        if row.npi:
+            self.physician_types[row.npi] = row.doc_type
+
+    def process_facility_row(self, row: FacilityRow) -> None:
+        """Reference: collect the Ventra FacilityNo for the FL-only check."""
+        self.facility_rows_consumed += 1
+        self.ventra_facilities.add(row.facility_no)
+
+    # ---- join + emit ----
+
+    def emit(
+        self, facility_map: dict[int, int]
+    ) -> tuple[
+        list[CollectionsAggregate],
+        list[ArSnapshotAggregate],
+        list[PhysicianMonthlyAggregate],
+    ]:
+        """Join all accumulated state + resolve facilities + aggregate.
+
+        ``facility_map`` maps Ventra FacilityNo -> HHA site_id. A FacilityNo
+        absent from the map raises ValueError (validate_fl_only should have
+        quarantined the drop first).
         """
-        self.guarantor_rows_consumed += 1
-        self.guarantor_facilities.add(row.facility_no)
+        collections: dict[tuple[date, int, str], _CollAcc] = defaultdict(_CollAcc)
+        ar: dict[tuple[date, int, str], Decimal] = defaultdict(lambda: Decimal(0))
+        physician: dict[tuple[date, str, int], _PhysAcc] = defaultdict(_PhysAcc)
+        physician_invoices: dict[tuple[date, str, int], set[int]] = defaultdict(set)
 
-    # ----------------------------------------------------------------
-    # Emit aggregates as writer-ready dataclass instances
-    # ----------------------------------------------------------------
+        for invoice_no, st in self._invoices.items():
+            if st.ventra_facility_no is None:
+                # Charge/transaction referencing an invoice with no header
+                # row — skip (the invoice file is required; a missing header
+                # is a join gap surfaced by row-count validation upstream).
+                continue
+            site_id = facility_map.get(st.ventra_facility_no)
+            if site_id is None:
+                raise ValueError(
+                    f"unmapped Ventra FacilityNo {st.ventra_facility_no} "
+                    f"(validate_fl_only should have caught this)"
+                )
 
-    def to_collections_rows(self) -> list[CollectionsAggregate]:
-        """Emit one CollectionsAggregate per (date, facility, payer) group.
+            # ---- collections: charges (by charge posting date + invoice payer) ----
+            for posting_date, npi, charge_amt, rvu, work_rvu in st.charges:
+                cdate = posting_date or self.drop_date
+                ckey = (cdate, site_id, st.payer_class)
+                collections[ckey].gross_charges += charge_amt
+                # physician monthly grain
+                if npi:
+                    pkey = (_first_of_month(cdate), npi, site_id)
+                    pacc = physician[pkey]
+                    pacc.total_rvu += rvu
+                    pacc.total_work_rvu += work_rvu
+                    pacc.charge_total += charge_amt
+                    physician_invoices[pkey].add(invoice_no)
 
-        Computes net_revenue per the locked formula:
-            net_revenue = payments_received - payer_refunds - patient_refunds
+            # ---- collections: payments/adjustments/refunds (by txn date + txn payer) ----
+            for tx_date, payer, bucket, amt in st.txns:
+                tdate = tx_date or self.drop_date
+                tkey = (tdate, site_id, payer)
+                setattr(
+                    collections[tkey], bucket, getattr(collections[tkey], bucket) + amt
+                )
 
-        Result is sorted by (date, facility, payer) so the writer's
-        idempotent upsert sees a deterministic order — easier to diff
-        between runs and easier to read in audit logs.
-        """
-        out: list[CollectionsAggregate] = []
-        for (d, fac, payer), acc in sorted(self._collections.items()):
+            # ---- AR snapshot: per-invoice open balance + age ----
+            open_balance = (
+                st.gross_charges
+                - st.payments_received
+                - st.contractual_adjustments
+                - st.write_offs
+                + st.payer_refunds
+                + st.patient_refunds
+            )
+            if open_balance != 0:
+                age_days = (
+                    (self.drop_date - st.last_posting_date).days
+                    if st.last_posting_date is not None
+                    else 0
+                )
+                bucket = classify_aging_bucket(age_days, open_balance)
+                ar[(self.drop_date, site_id, bucket)] += open_balance
+
+        # ---- materialize collections ----
+        coll_rows: list[CollectionsAggregate] = []
+        for (cdate, site_id, payer), acc in sorted(collections.items()):
             net = acc.payments_received - acc.payer_refunds - acc.patient_refunds
-            out.append(
+            coll_rows.append(
                 CollectionsAggregate(
-                    date=d,
-                    facility_no=fac,
+                    date=cdate,
+                    facility_no=site_id,
                     payer_class=payer,
                     gross_charges=acc.gross_charges,
                     payments_received=acc.payments_received,
@@ -300,73 +396,54 @@ class Aggregator:
                     net_revenue=net,
                 )
             )
-        return out
 
-    def to_ar_snapshot_rows(self) -> list[ArSnapshotAggregate]:
-        """Emit one ArSnapshotAggregate per (snapshot_date, facility, bucket)."""
-        return [
+        # ---- materialize AR snapshot ----
+        ar_rows = [
             ArSnapshotAggregate(
-                snapshot_date=d,
-                facility_no=fac,
+                snapshot_date=sdate,
+                facility_no=site_id,
                 aging_bucket=bucket,
-                outstanding_amount=acc.outstanding_amount,
+                outstanding_amount=amount,
             )
-            for (d, fac, bucket), acc in sorted(self._ar.items())
+            for (sdate, site_id, bucket), amount in sorted(ar.items())
         ]
 
-    def to_physician_monthly_rows(self) -> list[PhysicianMonthlyAggregate]:
-        """Emit one PhysicianMonthlyAggregate per (month, npi, facility)."""
-        return [
+        # ---- materialize physician monthly ----
+        phys_rows = [
             PhysicianMonthlyAggregate(
                 month=m,
                 physician_npi=npi,
-                facility_no=fac,
-                encounters_count=acc.encounters_count,
+                facility_no=site_id,
+                encounters_count=len(physician_invoices[(m, npi, site_id)]),
                 total_rvu=acc.total_rvu,
                 total_work_rvu=acc.total_work_rvu,
-                revenue_attributed=acc.revenue_attributed,
+                # v1: billed charges attributed to the physician (dollars).
+                # P2 refines to collected revenue once Ventra confirms whether
+                # payments can be attributed to a charge line / NPI (the
+                # TransactionsAlt file joins at invoice grain, not line/NPI).
+                revenue_attributed=acc.charge_total,
             )
-            for (m, npi, fac), acc in sorted(self._physician.items())
+            for (m, npi, site_id), acc in sorted(physician.items())
         ]
 
-    # ----------------------------------------------------------------
-    # Cross-file consistency check (called by main.py before write)
-    # ----------------------------------------------------------------
+        return coll_rows, ar_rows, phys_rows
 
-    def assert_facility_set_consistency(self) -> None:
-        """Raise V12-equivalent ValidationError if invoice + guarantor
-        facility sets differ.
 
-        Both files describe the same drop; if invoice references facility
-        5 but guarantor doesn't (or vice versa), Ventra's source-side
-        join is broken. Raise V12 to route to the incident path — this
-        is the same severity as a TX facility appearing (ADR-005
-        violation) because either is a vendor-side data-quality incident
-        that demands immediate investigation.
+@dataclass(slots=True)
+class _CollAcc:
+    gross_charges: Decimal = Decimal(0)
+    payments_received: Decimal = Decimal(0)
+    contractual_adjustments: Decimal = Decimal(0)
+    write_offs: Decimal = Decimal(0)
+    payer_refunds: Decimal = Decimal(0)
+    patient_refunds: Decimal = Decimal(0)
 
-        Special case: empty guarantor set is allowed (some drops have no
-        new guarantors; the file may contain only the header).
-        """
-        if not self.guarantor_facilities:
-            return
 
-        invoice_only = self.invoice_facilities - self.guarantor_facilities
-        guarantor_only = self.guarantor_facilities - self.invoice_facilities
-        if invoice_only or guarantor_only:
-            raise ValidationError(
-                rule="V12",
-                safe_message=(
-                    f"facility set mismatch between invoice and guarantor: "
-                    f"invoice_only={sorted(invoice_only)} "
-                    f"guarantor_only={sorted(guarantor_only)}"
-                ),
-                internal_details={
-                    "invoice_facility_count": len(self.invoice_facilities),
-                    "guarantor_facility_count": len(self.guarantor_facilities),
-                    "invoice_only": sorted(invoice_only),
-                    "guarantor_only": sorted(guarantor_only),
-                },
-            )
+@dataclass(slots=True)
+class _PhysAcc:
+    total_rvu: Decimal = Decimal(0)
+    total_work_rvu: Decimal = Decimal(0)
+    charge_total: Decimal = Decimal(0)
 
 
 __all__ = [
