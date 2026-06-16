@@ -74,7 +74,7 @@ from .exceptions import (
 )
 from .ingest import IngestRun, ingest_drop
 from .logging import configure_logging_for_stdspec
-from .manifest import load_manifest
+from .manifest import file_stem, load_manifest
 from .notify import (
     notify_dedup_skip,
     notify_failure,
@@ -246,33 +246,40 @@ async def process_one_message(
                 )
                 return
 
-            # ---------- Phase 3: streaming parse + aggregate ----------
+            # ---------- Phase 3: streaming parse + aggregate (5 files) ----------
+            # PHI is stripped at the parser layer (allowlist) before any row
+            # reaches the aggregator. Files stream independently; the
+            # aggregator joins them in memory by the transient InvoiceNo.
             aggregator = Aggregator(drop_date=drop_date)
+            row_processors = {
+                "invoice": aggregator.process_invoice_row,
+                "chargelines": aggregator.process_chargeline_row,
+                "physician": aggregator.process_physician_row,
+                "facility": aggregator.process_facility_row,
+                "transactionsalt": aggregator.process_transaction_row,
+            }
             for entry in manifest.entries:
-                parser = PARSER_ROUTES.get(entry.file_name)
-                if parser is None:
+                stem = file_stem(entry.file_name)
+                parser = PARSER_ROUTES.get(stem)
+                processor = row_processors.get(stem)
+                if parser is None or processor is None:
                     # Defensive — manifest.py's V1 should have rejected this.
                     raise ValidationError(
                         rule="V1",
                         safe_message=f"no parser registered for {entry.file_name}",
-                        internal_details={"file_name": entry.file_name},
+                        internal_details={"file_name": entry.file_name, "stem": stem},
                     )
                 data = file_bytes[entry.file_name]
-                if entry.file_name == "invoice.csv":
-                    for row in parser(data):
-                        aggregator.process_invoice_row(row)
-                elif entry.file_name == "guarantor.csv":
-                    for row in parser(data):
-                        aggregator.process_guarantor_row(row)
+                for row in parser(data):
+                    processor(row)
 
-            # ---------- Phase 4: cross-file validators ----------
-            aggregator.assert_facility_set_consistency()   # V12 cross-file
-            await validate_fl_only(db, aggregator.invoice_facilities)  # V12 + V8
+            # ---------- Phase 4: V12 + V8 — resolve facilities via mapping ----------
+            # Returns {ventra_facility_no: hha_site_id}; raises ADRViolation
+            # (non-FL) or V8 (unmapped) before the aggregator's join runs.
+            facility_map = await validate_fl_only(db, aggregator.ventra_facilities)
 
-            # ---------- Phase 5: emit aggregates + V15 layer 4 ----------
-            collections = aggregator.to_collections_rows()
-            ar_rows = aggregator.to_ar_snapshot_rows()
-            physician_rows = aggregator.to_physician_monthly_rows()
+            # ---------- Phase 5: emit aggregates + V9 + V15 layer 4 ----------
+            collections, ar_rows, physician_rows = aggregator.emit(facility_map)
 
             validate_ar_buckets(ar_rows)
             assert_v15_pre_write([*collections, *ar_rows, *physician_rows])
@@ -281,7 +288,8 @@ async def process_one_message(
                 EVENT_VENTRA_STDSPEC_VALIDATION_PASSED,
                 rules_evaluated=15,
                 invoice_rows_consumed=aggregator.invoice_rows_consumed,
-                guarantor_rows_consumed=aggregator.guarantor_rows_consumed,
+                chargeline_rows_consumed=aggregator.chargeline_rows_consumed,
+                transaction_rows_consumed=aggregator.transaction_rows_consumed,
             )
 
             # ---------- Phase 6: single-tx upsert ----------

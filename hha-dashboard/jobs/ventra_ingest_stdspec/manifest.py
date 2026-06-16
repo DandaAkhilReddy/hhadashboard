@@ -28,14 +28,32 @@ VENTRA_STDSPEC_PREFIX = "ventra/stdspec"
 
 MANIFEST_REQUIRED_COLUMNS = frozenset({"file_name", "sha256", "row_count"})
 
-# Known data-file names HHA accepts in a stdspec drop. Anything else
-# listed in the manifest is a V1 schema-drift quarantine.
-KNOWN_FILE_NAMES = frozenset(
+# Known data-file STEMS HHA accepts in a stdspec drop (per the 2026-06-15
+# decision: Invoice + ChargeLines + Physician + Facility + TransactionsAlt).
+# Matching is by stem (lowercased, extension-stripped) so ``Invoice.csv`` /
+# ``invoice.CSV`` / ``Invoice.txt`` all resolve — the exact delivered
+# filename + extension is a clarification ask to Ventra. Anything whose
+# stem is not here is a V1 schema-drift quarantine.
+KNOWN_FILE_STEMS = frozenset(
     {
-        "invoice.csv",
-        "guarantor.csv",
+        "invoice",
+        "chargelines",
+        "physician",
+        "facility",
+        "transactionsalt",
     }
 )
+
+
+def file_stem(file_name: str) -> str:
+    """Normalize a manifest file name to its routing stem.
+
+    Lowercases, drops the directory + extension, and removes non-alphanumeric
+    characters so ``ChargeLines.csv`` / ``charge-lines.CSV`` / ``ChargeLines``
+    all map to ``chargelines``.
+    """
+    base = file_name.strip().rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return "".join(ch for ch in base.lower() if ch.isalnum())
 
 
 class ManifestEntry(BaseModel):
@@ -126,14 +144,15 @@ def parse_manifest_bytes(data: bytes, drop_date: date) -> Manifest:
                 internal_details={"line_no": line_no, "error_class": type(e).__name__},
             ) from e
 
-        if entry.file_name not in KNOWN_FILE_NAMES:
+        if file_stem(entry.file_name) not in KNOWN_FILE_STEMS:
             raise ValidationError(
                 rule="V1",
                 safe_message=f"manifest references unknown file {entry.file_name!r}",
                 internal_details={
                     "line_no": line_no,
                     "file_name": entry.file_name,
-                    "known_files": sorted(KNOWN_FILE_NAMES),
+                    "file_stem": file_stem(entry.file_name),
+                    "known_stems": sorted(KNOWN_FILE_STEMS),
                 },
             )
         entries.append(entry)
@@ -243,7 +262,8 @@ async def load_manifest(
 
 
 __all__ = [
-    "KNOWN_FILE_NAMES",
+    "KNOWN_FILE_STEMS",
+    "file_stem",
     "MANIFEST_REQUIRED_COLUMNS",
     "VENDOR_INBOUND_CONTAINER",
     "VENTRA_STDSPEC_PREFIX",

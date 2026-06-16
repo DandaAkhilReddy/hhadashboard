@@ -56,54 +56,75 @@ VENDOR_STDSPEC = "ventra-stdspec"
 
 
 async def validate_fl_only(
-    db: AsyncSession, facilities: Iterable[int]
-) -> None:
-    """V12 + V8 — classify every facility_no against masters.sites.
+    db: AsyncSession, ventra_facilities: Iterable[int]
+) -> dict[int, int]:
+    """V12 + V8 — resolve every Ventra FacilityNo via dims.facility_codes
+    and confirm it maps to an ACTIVE Florida site. Returns the facility
+    map the aggregator uses.
 
-    Single query for the whole drop:
-        SELECT id, state FROM masters.sites WHERE status = 'ACTIVE'
+    Ventra keys its data by FacilityNo (2284-2290); HHA keys by
+    masters.sites.id (1-7). The open mappings (effective_through IS NULL)
+    in dims.facility_codes (migration 0014) bridge them. Single query:
 
-    Per facility:
-      - state == 'FL'     -> OK (no-op).
-      - state != 'FL'     -> ADRViolation (V12, ADR-005 incident path).
-      - not in result set -> ValidationError(rule='V8') (config drift,
-                              quarantine + ops alert).
+        SELECT fc.ventra_facility_no, fc.site_id, s.state
+        FROM dims.facility_codes fc
+        JOIN masters.sites s ON s.id = fc.site_id
+        WHERE fc.effective_through IS NULL AND s.status = 'ACTIVE'
 
-    Fail-fast — the FIRST non-FL facility short-circuits the entire
-    validation, mirroring the pre-aggregated path's semantics.
+    Per Ventra FacilityNo in the drop:
+      - mapped to an FL site     -> OK; added to the returned map.
+      - mapped to a non-FL site  -> ADRViolation (V12, ADR-005 incident).
+      - not mapped at all        -> ValidationError(rule='V8') (config
+                                    drift: Ventra sent a facility HHA has
+                                    no mapping for; quarantine + ops alert).
+
+    Returns ``{ventra_facility_no: site_id}`` for the FL facilities in the
+    drop. Fail-fast — the first non-FL or unmapped facility short-circuits
+    and the orchestrator quarantines before the aggregator runs.
     """
     result = await db.execute(
-        text("SELECT id, state FROM masters.sites WHERE status = 'ACTIVE'")
+        text(
+            "SELECT fc.ventra_facility_no, fc.site_id, s.state "
+            "FROM dims.facility_codes fc "
+            "JOIN masters.sites s ON s.id = fc.site_id "
+            "WHERE fc.effective_through IS NULL AND s.status = 'ACTIVE'"
+        )
     )
-    site_state: dict[int, str] = {row[0]: row[1] for row in result}
+    mapping: dict[int, tuple[int, str]] = {
+        row[0]: (row[1], row[2]) for row in result
+    }
 
-    for fid in sorted(set(facilities)):
-        state = site_state.get(fid)
-        if state == "FL":
-            continue
-        if state is not None:
-            # Site exists in HHA but is not FL — ADR-005 violation.
+    facility_map: dict[int, int] = {}
+    for fid in sorted(set(ventra_facilities)):
+        entry = mapping.get(fid)
+        if entry is None:
+            # No mapping row — V8 config drift (fail-closed).
+            raise ValidationError(
+                rule="V8",
+                safe_message=(
+                    f"unknown Ventra facility_no={fid} (no active mapping in "
+                    f"dims.facility_codes; vendor config drift or HHA missing "
+                    f"a mapping row)"
+                ),
+                internal_details={"ventra_facility_no": fid},
+            )
+        site_id, state = entry
+        if state != "FL":
+            # Mapped to a non-FL site — ADR-005 violation.
             raise ADRViolation(
                 safe_message=(
                     f"non-FL facility in Ventra stdspec drop: "
-                    f"facility_no={fid} hha_state={state}"
+                    f"ventra_facility_no={fid} site_id={site_id} hha_state={state}"
                 ),
                 internal_details={
-                    "facility_no": fid,
+                    "ventra_facility_no": fid,
+                    "site_id": site_id,
                     "hha_state": state,
                 },
             )
-        # Not in masters.sites at all — V8 config drift.
-        raise ValidationError(
-            rule="V8",
-            safe_message=(
-                f"unknown facility_no={fid} (not in masters.sites; "
-                f"vendor config drift or HHA missing a new site row)"
-            ),
-            internal_details={
-                "facility_no": fid,
-            },
-        )
+        facility_map[fid] = site_id
+
+    return facility_map
 
 
 # ============================================================================
