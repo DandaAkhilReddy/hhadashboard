@@ -24,6 +24,13 @@
 param(
     [string]$ResourceGroup = "rg-hha-dashboard-dev",
     [string]$KeyDir = "$env:USERPROFILE\.ssh\ventra-test",
+    # -ImportKeys <dir>: copy Ventra's real public keys (ventra-stdspec.pub +
+    # ventra-preagg.pub) from <dir> into $KeyDir and skip keygen. Use this
+    # once Ventra has sent their public keys (they keep the private keys and
+    # connect TO our SFTP). Pass the repo's committed copy:
+    #   -ImportKeys "<repo>\docs\06-vendors\ventra\sftp-keys"
+    # or the raw download folder.
+    [string]$ImportKeys = "",
     [switch]$WhatIfOnly,
     [switch]$SkipKeygen
 )
@@ -67,7 +74,32 @@ try {
     exit 1
 }
 
-# Step 1 — generate test SSH keypairs
+# Step 1 — import Ventra's real public keys, OR generate test keypairs.
+#
+# When Ventra has sent their public keys (-ImportKeys <dir>), we copy the
+# two .pub files into $KeyDir and skip keygen entirely — HHA never needs
+# the private keys; Ventra keeps those and connects TO our SFTP. Otherwise
+# we generate throwaway test keypairs so the endpoints can be smoke-tested
+# locally before Ventra is wired in.
+if ($ImportKeys -ne "") {
+    Write-Host ""
+    Write-Host "[1/4] Importing Ventra public keys from $ImportKeys ..."
+    if (-not (Test-Path $KeyDir)) {
+        New-Item -ItemType Directory -Path $KeyDir -Force | Out-Null
+    }
+    foreach ($name in @("ventra-stdspec.pub", "ventra-preagg.pub")) {
+        $src = Join-Path $ImportKeys $name
+        if (-not (Test-Path $src)) {
+            Write-Host "      Missing $src" -ForegroundColor Red
+            Write-Host "      Expected ventra-stdspec.pub + ventra-preagg.pub in the import dir."
+            exit 1
+        }
+        Copy-Item $src (Join-Path $KeyDir $name) -Force
+        Write-Host "      Imported $name"
+    }
+    $SkipKeygen = $true
+}
+
 if (-not $SkipKeygen) {
     Write-Host ""
     Write-Host "[1/4] Generating test SSH keypairs..."
