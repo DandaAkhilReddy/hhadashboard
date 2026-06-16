@@ -1,43 +1,52 @@
-"""Streaming parsers for Ventra's row-level Standard Data Extract.
+"""Streaming parsers for Ventra's Standard Data Extract (5 files).
 
-Two file types ship in each drop:
+Per the 2026-06-15 reply HHA ingests **Invoice, ChargeLines, Physician,
+Facility, TransactionsAlt** (files 1-4 + 5). Guarantor (#9) and 6-10 are
+declined.
 
-  ``invoice.csv``    — one row per claim/encounter line. Source of the
-                       collections + AR-snapshot + physician-monthly
-                       aggregates (H9 derives all three).
-  ``guarantor.csv``  — one row per guarantor. Read mostly for V15
-                       schema-presence sanity (Ventra promised these
-                       columns); the aggregator doesn't actually
-                       consume guarantor data — collections / AR /
-                       physician aggregates all derive from invoice rows.
+ROUTES maps the canonical (lowercased, no-extension) file stem -> parser.
+The orchestrator (R5) normalizes each manifest ``file_name`` to its stem
+before dispatching, so ``Invoice.csv`` / ``invoice.CSV`` / ``Invoice.txt``
+all resolve to the same parser (exact delivered names/extensions are a
+clarification ask to Ventra).
 
-Both parsers are streaming generators — they yield rows lazily so a
-multi-million-row month of claims doesn't slurp into memory. The
-aggregator (H9) consumes the generator one row at a time and updates
-its in-memory accumulator. The PHI columns Ventra sends in each row
-are stripped BEFORE the row reaches the Pydantic model, so even a
-parser bug cannot leak PHI further downstream.
-
-ROUTES maps file_name -> parser callable. The orchestrator (H13) reads
-the manifest and dispatches by file_name.
+Each parser is a streaming generator — the aggregator consumes one row at
+a time so a multi-million-row month never slurps into memory. PHI is
+stripped (allowlist) BEFORE each row reaches its Pydantic model.
 """
 
 from .standard_spec import (
-    GuarantorRow,
+    ChargeLineRow,
+    FacilityRow,
     InvoiceRow,
-    parse_guarantor,
+    PhysicianRow,
+    TransactionRow,
+    parse_chargelines,
+    parse_facility,
     parse_invoice,
+    parse_physician,
+    parse_transactions,
 )
 
+# Canonical stem -> parser. Stems are lowercase, extension-stripped.
 ROUTES = {
-    "invoice.csv": parse_invoice,
-    "guarantor.csv": parse_guarantor,
+    "invoice": parse_invoice,
+    "chargelines": parse_chargelines,
+    "physician": parse_physician,
+    "facility": parse_facility,
+    "transactionsalt": parse_transactions,
 }
 
 __all__ = [
     "ROUTES",
-    "GuarantorRow",
+    "ChargeLineRow",
+    "FacilityRow",
     "InvoiceRow",
-    "parse_guarantor",
+    "PhysicianRow",
+    "TransactionRow",
+    "parse_chargelines",
+    "parse_facility",
     "parse_invoice",
+    "parse_physician",
+    "parse_transactions",
 ]

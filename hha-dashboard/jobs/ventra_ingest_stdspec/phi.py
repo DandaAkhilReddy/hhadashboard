@@ -324,6 +324,13 @@ def keep_safe_columns(
     kept: dict[str, Any] = {}
     dropped: list[str] = []
     for key, value in row.items():
+        # csv.DictReader puts overflow cells (a row with more fields than the
+        # header — e.g. an unquoted comma inside a currency value) under a
+        # ``None`` key whose value is a list. Such columns are always dropped:
+        # they are never in the allowlist and must never reach a sink.
+        if not isinstance(key, str):
+            dropped.append("__overflow__")
+            continue
         if _normalize_column(key) in allowlist:
             kept[key] = value
         else:
