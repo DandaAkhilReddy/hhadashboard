@@ -10,8 +10,20 @@ HHA runs **both** Ventra deliveries in parallel and reconciles them:
 
 | Feed | SFTP user | Path | Files | PHI | Lifecycle |
 |---|---|---|---|---|---|
-| **Standard Data Extract** (Option 1, row-level) | `ventra-stdspec` | `vendor-inbound/ventra/stdspec/YYYY-MM-DD/` | 5 (below) | yes (stripped at edge) | 30 days |
-| **Pre-aggregated** (Option 2) | `ventra-preagg` | `vendor-inbound/ventra/preagg/YYYY-MM-DD/` | 3 (collections/ar/physician) | no | 90 days |
+| **Standard Data Extract** (Option 1, row-level) | `ventrastdspec` | `vendor-inbound/ventra/stdspec/YYYY-MM-DD/` | 5 (below) | yes (stripped at edge) | 30 days |
+| **Pre-aggregated** (Option 2) | `ventrapreagg` | `vendor-inbound/ventra/preagg/YYYY-MM-DD/` | 3 (collections/ar/physician) | no | 90 days |
+
+> SFTP local-user names are lowercase-alphanumeric (Azure requirement — no
+> hyphens). The full SFTP username is `<storage-account>.ventrastdspec` /
+> `<storage-account>.ventrapreagg`. The `.pub` key filenames keep the
+> hyphen (`ventra-stdspec.pub`) — those are just file names.
+>
+> **Dev endpoint (live 2026-06-17):** host
+> `sthhavendordev5801224b.blob.core.windows.net:22`, users
+> `sthhavendordev5801224b.ventrastdspec` /
+> `sthhavendordev5801224b.ventrapreagg`. Firewall is Deny-by-default; add
+> Ventra's egress IPs with
+> `az storage account network-rule add -g rg-hha-dashboard-dev --account-name sthhavendordev5801224b --ip-address <ip>`.
 
 Both land on the same storage account; Event Grid fires on each feed's
 `_MANIFEST.csv`; separate Container Apps Jobs process each.
