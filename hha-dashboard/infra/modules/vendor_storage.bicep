@@ -179,7 +179,11 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2024-01-01'
       enabled: true
       days: soft_delete_retention_days
     }
-    isVersioningEnabled: true
+    // Blob versioning is NOT supported on accounts with hierarchical
+    // namespace (HNS) enabled — and HNS is required for SFTP, which this
+    // account always enables. Soft-delete (above) covers accidental
+    // overwrite/delete recovery; versioning would be rejected at deploy.
+    isVersioningEnabled: false
     changeFeed: {
       enabled: false
     }
@@ -357,9 +361,13 @@ resource ventraSftpUser 'Microsoft.Storage/storageAccounts/localUsers@2024-01-01
 // The Container App Job processing this user's drops (caj-ventra-ingest-stdspec,
 // added in H5) strips PHI before any column reaches the DB. Raw blobs land
 // here, get aggregated in-memory by the job, then auto-delete on day 30.
+// NOTE: SFTP local-user names must be lowercase alphanumeric ONLY (no
+// hyphens) per Azure Storage. The connection username is
+// ``<account>.ventrastdspec``. The home-directory path keeps hyphens —
+// that's a blob path, which allows them.
 resource ventraStdspecSftpUser 'Microsoft.Storage/storageAccounts/localUsers@2024-01-01' = if (stdspec_ready) {
   parent: storage
-  name: 'ventra-stdspec'
+  name: 'ventrastdspec'
   properties: {
     homeDirectory: 'vendor-inbound/ventra/stdspec'
     sshAuthorizedKeys: [
@@ -396,7 +404,7 @@ resource ventraStdspecSftpUser 'Microsoft.Storage/storageAccounts/localUsers@202
 // no separate lifecycle override needed).
 resource ventraPreaggSftpUser 'Microsoft.Storage/storageAccounts/localUsers@2024-01-01' = if (preagg_ready) {
   parent: storage
-  name: 'ventra-preagg'
+  name: 'ventrapreagg'
   properties: {
     homeDirectory: 'vendor-inbound/ventra/preagg'
     sshAuthorizedKeys: [
@@ -430,13 +438,13 @@ output blob_endpoint string = storage.properties.primaryEndpoints.blob
 output sftp_endpoint string = enable_sftp ? '${storage.name}.blob.${environment().suffixes.storage}' : ''
 
 @description('Phase 4 hybrid — full SFTP connection string for the Ventra Standard-Spec (row-level) user. Empty when stdspec is disabled. Pass this to Ventra via secure channel.')
-output ventra_stdspec_sftp_connection string = stdspec_ready ? '${storage.name}.${storage.name}.blob.${environment().suffixes.storage}:22 (user: ventra-stdspec, path: /vendor-inbound/ventra/stdspec/)' : ''
+output ventra_stdspec_sftp_connection string = stdspec_ready ? '${storage.name}.blob.${environment().suffixes.storage}:22 (user: ${storage.name}.ventrastdspec, path: /vendor-inbound/ventra/stdspec/)' : ''
 
 @description('Phase 4 hybrid — whether the stdspec local user was provisioned in this deployment. Downstream modules gate their own provisioning on this.')
 output stdspec_ready bool = stdspec_ready
 
 @description('Phase 4 hybrid — full SFTP connection string for the Ventra pre-aggregated user. Empty when preagg is disabled. Pass this to Ventra via secure channel.')
-output ventra_preagg_sftp_connection string = preagg_ready ? '${storage.name}.${storage.name}.blob.${environment().suffixes.storage}:22 (user: ventra-preagg, path: /vendor-inbound/ventra/preagg/)' : ''
+output ventra_preagg_sftp_connection string = preagg_ready ? '${storage.name}.blob.${environment().suffixes.storage}:22 (user: ${storage.name}.ventrapreagg, path: /vendor-inbound/ventra/preagg/)' : ''
 
 @description('Phase 4 hybrid — whether the preagg local user was provisioned in this deployment. Downstream modules (Event Grid filter, Container App Job) gate on this.')
 output preagg_ready bool = preagg_ready
