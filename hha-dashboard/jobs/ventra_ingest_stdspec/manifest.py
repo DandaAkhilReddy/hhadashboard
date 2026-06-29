@@ -1,23 +1,35 @@
-"""Manifest parser + V1-V4 validators for the row-level pipeline.
+"""Zip-drop loader for the row-level (Standard Spec) Ventra ingest.
 
-Mirrors the pre-aggregated path's manifest.py from PR #54 with deltas:
+Phase 4Z change: Ventra delivers a single ``.zip`` per drop (no
+``_MANIFEST.csv``) per their 2026-06-22 reply. This module downloads the
+zip, validates + unzips it in memory, and returns the 5 CSV byte blobs
+keyed by file name. The zip's own CRC32 (validated by ``ZipFile.read``)
+replaces the manifest sha256/row-count checks — integrity is per-member
+and automatic.
 
-  - VENTRA_PREFIX = 'ventra/stdspec' (one level deeper).
-  - KNOWN_FILE_NAMES = {'invoice.csv', 'guarantor.csv'} (row-level files,
-    not the pre-aggregated trio).
-  - Exceptions are the SafeMessageError-based ValidationError from
-    ``exceptions.py``; error details carry only file/line/sha8 — never
-    raw row content.
+Validation rules preserved under the zip model:
+  - V1  zip is well-formed, within the size guards, contains only known
+        members, and every member's CRC32 is intact
+  - V2  all 5 expected files are present
+  - V3  per-member CRC32 (enforced by ``zipfile`` on read; a corrupt
+        member raises ``BadZipFile``, mapped to ValidationError)
+
+Drop date comes from the zip filename (``HHA_Extact_20260610.zip`` ->
+2026-06-10), tolerant of the vendor's ``Extact``/``Extract`` spelling and
+of an optional dated subfolder before the zip.
+
+The module name stays ``manifest.py`` for git continuity; there is no
+longer a CSV manifest in the contract.
 """
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import io
+import re
+import zipfile
+from dataclasses import dataclass
 from datetime import date
-
-from pydantic import BaseModel, Field
 
 from app.services import blob
 
@@ -26,27 +38,23 @@ from .exceptions import ValidationError
 VENDOR_INBOUND_CONTAINER = "vendor-inbound"
 VENTRA_STDSPEC_PREFIX = "ventra/stdspec"
 
-MANIFEST_REQUIRED_COLUMNS = frozenset({"file_name", "sha256", "row_count"})
-
-# Known data-file STEMS HHA accepts in a stdspec drop (per the 2026-06-15
-# decision: Invoice + ChargeLines + Physician + Facility + TransactionsAlt).
-# Matching is by stem (lowercased, extension-stripped) so ``Invoice.csv`` /
-# ``invoice.CSV`` / ``Invoice.txt`` all resolve — the exact delivered
-# filename + extension is a clarification ask to Ventra. Anything whose
-# stem is not here is a V1 schema-drift quarantine.
+# The 5 files HHA ingests (2026-06-15 decision; filenames confirmed by
+# Ventra 2026-06-22). Matched by stem so Invoice.csv / invoice.CSV resolve.
 KNOWN_FILE_STEMS = frozenset(
-    {
-        "invoice",
-        "chargelines",
-        "physician",
-        "facility",
-        "transactionsalt",
-    }
+    {"invoice", "chargelines", "physician", "facility", "transactionsalt"}
 )
+
+# Zip-bomb guards. The real drop is ~35 MB uncompressed across 5 files;
+# these caps are generous headroom, not a tight fit. A drop that exceeds
+# them is rejected as V1 before any member is decompressed.
+MAX_ZIP_ENTRIES = 50
+MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024  # 500 MB
+
+_DROP_DATE_RE = re.compile(r"(\d{8})")
 
 
 def file_stem(file_name: str) -> str:
-    """Normalize a manifest file name to its routing stem.
+    """Normalize a delivered file name to its routing stem.
 
     Lowercases, drops the directory + extension, and removes non-alphanumeric
     characters so ``ChargeLines.csv`` / ``charge-lines.CSV`` / ``ChargeLines``
@@ -56,221 +64,202 @@ def file_stem(file_name: str) -> str:
     return "".join(ch for ch in base.lower() if ch.isalnum())
 
 
-class ManifestEntry(BaseModel):
-    """One row in ``_MANIFEST.csv``."""
+def drop_date_from_zip_name(zip_name: str) -> date:
+    """Parse the drop date from the zip filename.
 
-    file_name: str
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    row_count: int = Field(ge=0)
+    Reads the first 8-digit run as ``YYYYMMDD`` (e.g.
+    ``HHA_Extact_20260610.zip`` -> 2026-06-10). Tolerant of the vendor's
+    ``Extact``/``Extract`` spelling and of any directory prefix.
+
+    Raises ``ValidationError(rule='V1')`` if no parseable calendar date is
+    present in the name.
+    """
+    base = zip_name.strip().rsplit("/", 1)[-1]
+    match = _DROP_DATE_RE.search(base)
+    if match is None:
+        raise ValidationError(
+            rule="V1",
+            safe_message="zip filename has no YYYYMMDD drop date",
+            internal_details={"zip_name": base},
+        )
+    digits = match.group(1)
+    try:
+        return date(int(digits[0:4]), int(digits[4:6]), int(digits[6:8]))
+    except ValueError as e:
+        raise ValidationError(
+            rule="V1",
+            safe_message="zip filename date is not a valid calendar date",
+            internal_details={"zip_name": base, "digits": digits},
+        ) from e
 
 
-class Manifest(BaseModel):
-    """Parsed manifest with metadata derived from the blob path."""
+@dataclass(frozen=True, slots=True)
+class ZipDrop:
+    """One unzipped Standard Spec drop, fully in memory.
+
+    ``file_bytes`` maps the delivered file name (e.g. ``Invoice.csv``) to
+    its raw CSV bytes. ``zip_file_name`` + ``zip_sha256`` form the V13
+    dedup key — one ``ops.processed_files`` ledger row per drop, not per
+    member. ``total_rows`` is the summed data-row count across the 5 files
+    (header excluded) for telemetry.
+    """
 
     drop_date: date
-    entries: list[ManifestEntry]
-
-    @property
-    def total_rows(self) -> int:
-        return sum(e.row_count for e in self.entries)
+    zip_file_name: str
+    zip_sha256: str
+    file_bytes: dict[str, bytes]
+    total_rows: int
 
     @property
     def file_names(self) -> list[str]:
-        return [e.file_name for e in self.entries]
+        return list(self.file_bytes.keys())
 
 
-def _drop_path(drop_date: date) -> str:
-    """Folder path inside ``vendor-inbound`` for a given drop_date.
+def _is_noise_member(name: str) -> bool:
+    """True for zip members we ignore: directories + macOS/OS cruft.
 
-    Returns e.g. ``ventra/stdspec/2026-06-03``.
+    Skips directory entries (trailing slash), the ``__MACOSX/`` resource
+    fork tree, and dotfiles like ``.DS_Store`` so a zip created on a Mac
+    doesn't fail the unknown-member check.
     """
-    return f"{VENTRA_STDSPEC_PREFIX}/{drop_date.isoformat()}"
+    base = name.rsplit("/", 1)[-1]
+    return (
+        name.endswith("/")
+        or name.startswith("__MACOSX/")
+        or base.startswith(".")
+        or base == ""
+    )
 
 
-def parse_manifest_bytes(data: bytes, drop_date: date) -> Manifest:
-    """V1 — parse ``_MANIFEST.csv`` content.
+def unzip_drop(zip_bytes: bytes, zip_blob_path: str) -> ZipDrop:
+    """V1 + V2 + V3 — validate + unzip a Standard Spec drop in memory.
 
-    Raises ``ValidationError(rule='V1')`` on:
-      - UTF-8 decode failure
-      - missing header
-      - missing required column
-      - malformed row (bad sha256, non-int row_count)
-      - file_name not in KNOWN_FILE_NAMES
-      - empty data section
-      - duplicate file_name within a single manifest
+    - V1: the zip is well-formed, within the size guards, and every
+          non-noise member routes to a known file stem (no unknowns, no
+          duplicates).
+    - V3: each member's CRC32 is checked by ``ZipFile.read`` — a corrupt
+          member raises ``BadZipFile``, mapped to ValidationError(V1).
+    - V2: all 5 ``KNOWN_FILE_STEMS`` are present after extraction.
 
-    Error details are PHI-safe — they contain only line numbers, file
-    names, sha256 prefixes, and the column names involved.
+    Never writes to disk. The decompressed bytes live only in the returned
+    dict and are released to GC once the aggregator has consumed them.
     """
+    zip_name = zip_blob_path.rsplit("/", 1)[-1]
+    drop_date = drop_date_from_zip_name(zip_name)
+    zip_sha256 = hashlib.sha256(zip_bytes).hexdigest()
+
     try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError as e:
+        archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile as e:
         raise ValidationError(
             rule="V1",
-            safe_message="manifest is not valid UTF-8",
-            internal_details={"decode_error": str(e)},
+            safe_message="delivered file is not a valid zip",
+            internal_details={"zip_name": zip_name},
         ) from e
 
-    reader = csv.DictReader(io.StringIO(text))
-    if reader.fieldnames is None:
-        raise ValidationError(
-            rule="V1",
-            safe_message="manifest is empty (no header row)",
-        )
-
-    missing_cols = MANIFEST_REQUIRED_COLUMNS - set(reader.fieldnames)
-    if missing_cols:
-        raise ValidationError(
-            rule="V1",
-            safe_message="manifest is missing required columns",
-            internal_details={
-                "missing": sorted(missing_cols),
-                "got": list(reader.fieldnames),
-            },
-        )
-
-    entries: list[ManifestEntry] = []
-    for line_no, row in enumerate(reader, start=2):
-        try:
-            entry = ManifestEntry(
-                file_name=row["file_name"].strip(),
-                sha256=row["sha256"].strip().lower(),
-                row_count=int(row["row_count"]),
+    with archive as zf:
+        infos = zf.infolist()
+        if len(infos) > MAX_ZIP_ENTRIES:
+            raise ValidationError(
+                rule="V1",
+                safe_message="zip has too many entries",
+                internal_details={"entries": len(infos), "max": MAX_ZIP_ENTRIES},
             )
-        except (ValueError, KeyError) as e:
+        total_uncompressed = sum(info.file_size for info in infos)
+        if total_uncompressed > MAX_UNCOMPRESSED_BYTES:
             raise ValidationError(
                 rule="V1",
-                safe_message=f"manifest row {line_no} is malformed",
-                internal_details={"line_no": line_no, "error_class": type(e).__name__},
-            ) from e
-
-        if file_stem(entry.file_name) not in KNOWN_FILE_STEMS:
-            raise ValidationError(
-                rule="V1",
-                safe_message=f"manifest references unknown file {entry.file_name!r}",
+                safe_message="zip uncompressed size exceeds the limit",
                 internal_details={
-                    "line_no": line_no,
-                    "file_name": entry.file_name,
-                    "file_stem": file_stem(entry.file_name),
-                    "known_stems": sorted(KNOWN_FILE_STEMS),
+                    "uncompressed_bytes": total_uncompressed,
+                    "max": MAX_UNCOMPRESSED_BYTES,
                 },
             )
-        entries.append(entry)
 
-    if not entries:
-        raise ValidationError(
-            rule="V1",
-            safe_message="manifest has zero data rows",
-        )
+        file_bytes: dict[str, bytes] = {}
+        seen_stems: set[str] = set()
+        for info in infos:
+            if _is_noise_member(info.filename):
+                continue
+            stem = file_stem(info.filename)
+            if stem not in KNOWN_FILE_STEMS:
+                raise ValidationError(
+                    rule="V1",
+                    safe_message=f"zip contains an unexpected file {info.filename!r}",
+                    internal_details={
+                        "file_name": info.filename,
+                        "stem": stem,
+                        "known_stems": sorted(KNOWN_FILE_STEMS),
+                    },
+                )
+            if stem in seen_stems:
+                raise ValidationError(
+                    rule="V1",
+                    safe_message=f"zip contains duplicate {stem} files",
+                    internal_details={"stem": stem, "file_name": info.filename},
+                )
+            seen_stems.add(stem)
+            base = info.filename.rsplit("/", 1)[-1]
+            try:
+                # .read() validates the member's CRC32 and decompresses it.
+                # A corrupt member can surface as BadZipFile (CRC mismatch),
+                # zlib.error / EOFError (broken deflate stream), OSError, or a
+                # decode error from a mangled local header. Any failure on
+                # this untrusted-vendor read is a V3 integrity failure that
+                # must quarantine, never crash-and-retry — so we fail closed
+                # on Exception and re-raise as a PHI-safe ValidationError.
+                file_bytes[base] = zf.read(info)
+            except Exception as e:  # noqa: BLE001 — fail-closed on untrusted zip member
+                raise ValidationError(
+                    rule="V1",
+                    safe_message=f"zip member {base!r} failed its integrity check",
+                    internal_details={"file_name": base},
+                ) from e
 
-    names = [e.file_name for e in entries]
-    if len(set(names)) != len(names):
-        raise ValidationError(
-            rule="V1",
-            safe_message="manifest contains duplicate file_name entries",
-            internal_details={"file_names": names},
-        )
-
-    return Manifest(drop_date=drop_date, entries=entries)
-
-
-async def verify_manifest_presence(manifest: Manifest) -> None:
-    """V2 — every file in the manifest exists in the drop folder."""
-    drop_dir = _drop_path(manifest.drop_date)
-    listed = await blob.list_by_prefix(
-        container_name=VENDOR_INBOUND_CONTAINER,
-        prefix=f"{drop_dir}/",
-        include_metadata=False,
-    )
-    existing = {b["name"].rsplit("/", 1)[-1] for b in listed}
-    expected = {e.file_name for e in manifest.entries}
-    missing = expected - existing
+    missing = KNOWN_FILE_STEMS - seen_stems
     if missing:
         raise ValidationError(
             rule="V2",
-            safe_message="manifest references files not present in drop folder",
+            safe_message="zip is missing required files",
             internal_details={
-                "missing": sorted(missing),
-                "present": sorted(existing),
-                "drop_path": drop_dir,
+                "missing_stems": sorted(missing),
+                "present": sorted(seen_stems),
             },
         )
 
+    total_rows = sum(max(0, len(data.splitlines()) - 1) for data in file_bytes.values())
 
-async def verify_manifest_checksums(manifest: Manifest) -> dict[str, bytes]:
-    """V3 + V4 — download each file, verify SHA-256 + row count.
-
-    Returns ``{file_name: bytes}`` so the caller does not re-download
-    for parsing. Bytes are released to GC after the aggregator consumes
-    them; never persisted.
-    """
-    drop_dir = _drop_path(manifest.drop_date)
-    out: dict[str, bytes] = {}
-
-    for entry in manifest.entries:
-        blob_path = f"{drop_dir}/{entry.file_name}"
-        data = await blob.download_bytes(
-            container_name=VENDOR_INBOUND_CONTAINER, blob_name=blob_path
-        )
-
-        actual_sha = hashlib.sha256(data).hexdigest()
-        if actual_sha != entry.sha256:
-            raise ValidationError(
-                rule="V3",
-                safe_message=f"sha256 mismatch on {entry.file_name}",
-                internal_details={
-                    "file_name": entry.file_name,
-                    # 8-char prefixes — full hashes can hint at content.
-                    "expected_sha256_prefix": entry.sha256[:8],
-                    "actual_sha256_prefix": actual_sha[:8],
-                },
-            )
-
-        actual_rows = max(0, len(data.splitlines()) - 1)
-        if actual_rows != entry.row_count:
-            raise ValidationError(
-                rule="V4",
-                safe_message=f"row_count mismatch on {entry.file_name}",
-                internal_details={
-                    "file_name": entry.file_name,
-                    "expected_row_count": entry.row_count,
-                    "actual_row_count": actual_rows,
-                },
-            )
-
-        out[entry.file_name] = data
-
-    return out
-
-
-async def load_manifest(
-    drop_date: date, manifest_blob_path: str
-) -> tuple[Manifest, dict[str, bytes]]:
-    """V1 + V2 + V3 + V4 in one call.
-
-    ``manifest_blob_path`` is the full blob path from the Event Grid
-    event subject (e.g. ``ventra/stdspec/2026-06-03/_MANIFEST.csv``).
-    Caller extracted ``drop_date`` from that path; we trust it.
-    """
-    manifest_bytes = await blob.download_bytes(
-        container_name=VENDOR_INBOUND_CONTAINER, blob_name=manifest_blob_path
+    return ZipDrop(
+        drop_date=drop_date,
+        zip_file_name=zip_name,
+        zip_sha256=zip_sha256,
+        file_bytes=file_bytes,
+        total_rows=total_rows,
     )
-    manifest = parse_manifest_bytes(manifest_bytes, drop_date)
-    await verify_manifest_presence(manifest)
-    file_bytes = await verify_manifest_checksums(manifest)
-    return manifest, file_bytes
+
+
+async def load_zip_drop(zip_blob_path: str) -> ZipDrop:
+    """Download the drop zip from blob storage and unzip it in memory.
+
+    ``zip_blob_path`` is the path relative to vendor-inbound taken from the
+    Event Grid subject — e.g. ``ventra/stdspec/HHA_Extact_20260610.zip`` or
+    ``ventra/stdspec/2026-06-10/HHA_Extact_20260610.zip`` (a dated subfolder
+    is tolerated). Returns a :class:`ZipDrop`; raises ``ValidationError`` on
+    any V1/V2/V3 failure.
+    """
+    zip_bytes = await blob.download_bytes(
+        container_name=VENDOR_INBOUND_CONTAINER, blob_name=zip_blob_path
+    )
+    return unzip_drop(zip_bytes, zip_blob_path)
 
 
 __all__ = [
     "KNOWN_FILE_STEMS",
-    "file_stem",
-    "MANIFEST_REQUIRED_COLUMNS",
     "VENDOR_INBOUND_CONTAINER",
     "VENTRA_STDSPEC_PREFIX",
-    "Manifest",
-    "ManifestEntry",
-    "load_manifest",
-    "parse_manifest_bytes",
-    "verify_manifest_checksums",
-    "verify_manifest_presence",
+    "ZipDrop",
+    "drop_date_from_zip_name",
+    "file_stem",
+    "load_zip_drop",
+    "unzip_drop",
 ]

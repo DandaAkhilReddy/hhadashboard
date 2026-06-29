@@ -1,7 +1,7 @@
 """Row-level (Standard Spec) Ventra ingest — queue-driven entrypoint.
 
 KEDA's azure-queue scaler on ``q-ventra-stdspec-manifests`` (Bicep H4)
-spins up one replica per Event Grid manifest event. This entrypoint
+spins up one replica per Event Grid zip-drop event. This entrypoint
 receives ONE message, processes end-to-end, then exits.
 
 Flow (mirrors the pre-aggregated path with row-level + PHI-safety
@@ -9,19 +9,20 @@ deltas):
 
   1. Bootstrap PHI-safe structlog + telemetry + audit.upn
   2. Receive ONE message from q-ventra-stdspec-manifests
-  3. Parse Event Grid envelope -> drop_date + manifest_blob_path
+  3. Parse Event Grid envelope -> drop_date + zip_blob_path
   4. Open DB session, start ops.ingest_run row (vendor='ventra-stdspec')
   5. Validators in order:
-       V1-V4   load_manifest (parse + presence + sha + row_count)
-       V5+V15L1 streaming parse_invoice + parse_guarantor (PHI stripped
-                at the parser layer; expected PHI columns confirmed in
-                the raw header for sanity)
-       V15L2   aggregator.process_invoice_row runs assert_no_phi_columns
-                on every row's model_dump
+       V1-V3   load_zip_drop (download zip + unzip in memory; per-member
+                CRC32 = integrity; all 5 files present). Ventra delivers a
+                single zip per drop (no _MANIFEST.csv) per their 2026-06-22
+                reply.
+       V5+V15L1 streaming parsers for the 5 files (PHI stripped at the
+                parser layer via the allowlist before any row is built)
+       V15L2   aggregator.process_*_row runs assert_no_phi_columns on
+                every row's model_dump
        V9      validate_ar_buckets (uniqueness + sign discipline)
-       V12+V8  validate_fl_only (masters.sites lookup)
-       V12-x   assert_facility_set_consistency (invoice vs guarantor sets)
-       V13     check_dedup -> DedupDecision
+       V12+V8  validate_fl_only (dims.facility_codes -> masters.sites)
+       V13     check_dedup -> DedupDecision (keyed on the zip sha256)
        V15L4   assert_v15_pre_write on the aggregate dataclasses
   6. If skip_entirely: emit dedup_skip, complete run, delete msg, exit 0
   7. Otherwise: ingest_drop (single-tx upsert), complete run, notify_success
@@ -74,7 +75,7 @@ from .exceptions import (
 )
 from .ingest import IngestRun, ingest_drop
 from .logging import configure_logging_for_stdspec
-from .manifest import file_stem, load_manifest
+from .manifest import drop_date_from_zip_name, file_stem, load_zip_drop
 from .notify import (
     notify_dedup_skip,
     notify_failure,
@@ -127,11 +128,15 @@ VISIBILITY_TIMEOUT_SECONDS = 1080
 def parse_event_grid_payload(message_content: str) -> tuple[date, str]:
     """Parse an Event Grid event delivered via Storage Queue.
 
-    Subject format for the stdspec subscription (H4):
-        /blobServices/default/containers/vendor-inbound/blobs/ventra/stdspec/YYYY-MM-DD/_MANIFEST.csv
+    Subject format for the stdspec subscription (Phase 4Z) — a single zip
+    per drop, no manifest:
+        /blobServices/default/containers/vendor-inbound/blobs/ventra/stdspec/HHA_Extact_20260610.zip
+    An optional dated subfolder before the zip is tolerated, e.g.
+        .../ventra/stdspec/2026-06-10/HHA_Extact_20260610.zip
 
-    Returns (drop_date, manifest_blob_path) where manifest_blob_path is
-    relative to vendor-inbound: ``ventra/stdspec/YYYY-MM-DD/_MANIFEST.csv``.
+    Returns (drop_date, zip_blob_path) where zip_blob_path is relative to
+    vendor-inbound (``ventra/stdspec/HHA_Extact_20260610.zip``) and
+    drop_date is parsed from the zip filename.
 
     Raises ``ValueError`` on a malformed payload — caller treats that as
     a poison message and deletes it.
@@ -150,13 +155,22 @@ def parse_event_grid_payload(message_content: str) -> tuple[date, str]:
     idx = subject.find(marker)
     if idx == -1:
         raise ValueError(f"unexpected subject format: {subject!r}")
-    blob_path = subject[idx + len(marker):]  # ventra/stdspec/YYYY-MM-DD/_MANIFEST.csv
+    blob_path = subject[idx + len(marker):]  # ventra/stdspec/.../HHA_Extact_YYYYMMDD.zip
 
     parts = blob_path.split("/")
-    # Expect at least: ventra / stdspec / YYYY-MM-DD / _MANIFEST.csv
-    if len(parts) < 4 or parts[0] != "ventra" or parts[1] != "stdspec":
+    # Expect at least: ventra / stdspec / <...>.zip
+    if len(parts) < 3 or parts[0] != "ventra" or parts[1] != "stdspec":
         raise ValueError(f"unexpected blob path: {blob_path!r}")
-    drop_date = date.fromisoformat(parts[2])
+    if not blob_path.lower().endswith(".zip"):
+        raise ValueError(f"stdspec trigger expected a .zip, got: {blob_path!r}")
+
+    try:
+        drop_date = drop_date_from_zip_name(blob_path)
+    except ValidationError as e:
+        # A zip with no parseable date can't be routed — poison message.
+        raise ValueError(
+            f"cannot derive drop date from zip name: {blob_path!r}"
+        ) from e
 
     return drop_date, blob_path
 
@@ -188,7 +202,7 @@ async def process_one_message(
     message_content: str,
     recipients: list[str],
 ) -> None:
-    """Process a single Event Grid manifest event end-to-end.
+    """Process a single Event Grid zip-drop event end-to-end.
 
     Raises ANY exception not in {PHILeakError, ADRViolation, ValidationError}
     so the caller can decide whether to delete the queue message
@@ -196,7 +210,7 @@ async def process_one_message(
     """
     correlation_id = uuid.uuid4()
     started = time.monotonic()
-    drop_date, manifest_path = parse_event_grid_payload(message_content)
+    drop_date, zip_blob_path = parse_event_grid_payload(message_content)
     bind_run(run_id=None, correlation_id=correlation_id, drop_date=drop_date)
 
     set_current_upn(SERVICE_UPN)
@@ -204,24 +218,30 @@ async def process_one_message(
         run = await IngestRun.start(
             db,
             drop_date=drop_date,
-            manifest_path=manifest_path,
+            manifest_path=zip_blob_path,
             correlation_id=correlation_id,
         )
         bind_run(run_id=run.run_id, correlation_id=correlation_id, drop_date=drop_date)
         emit_event(
             EVENT_VENTRA_STDSPEC_MANIFEST_RECEIVED,
-            manifest_path=manifest_path,
+            zip_path=zip_blob_path,
         )
 
         try:
-            # ---------- Phase 1: V1-V4 manifest + checksums ----------
-            manifest, file_bytes = await load_manifest(drop_date, manifest_path)
+            # ---------- Phase 1: V1-V3 — download + unzip the drop ----------
+            # Single zip per drop (no manifest); zipfile validates per-member
+            # CRC32 on read, and unzip_drop enforces presence of all 5 files.
+            drop = await load_zip_drop(zip_blob_path)
+            file_bytes = drop.file_bytes
 
             # ---------- Phase 2: V13 dedup BEFORE parsing ----------
-            # Cheaper to short-circuit on a re-delivery before we slurp + parse.
+            # Cheaper to short-circuit on a re-delivery before we unzip + parse.
+            # The zip itself is the dedup unit: one ledger row per drop keyed
+            # on the zip's sha256.
             dedup_entries = [
-                DedupManifestEntry(file_name=e.file_name, sha256=e.sha256)
-                for e in manifest.entries
+                DedupManifestEntry(
+                    file_name=drop.zip_file_name, sha256=drop.zip_sha256
+                )
             ]
             decision = await check_dedup(db, drop_date, dedup_entries)
 
@@ -233,8 +253,8 @@ async def process_one_message(
                 await run.complete(
                     db,
                     status="succeeded",
-                    files_count=len(manifest.entries),
-                    rows_in=manifest.total_rows,
+                    files_count=len(drop.file_bytes),
+                    rows_in=drop.total_rows,
                     rows_out=0,
                 )
                 await notify_dedup_skip(
@@ -258,18 +278,17 @@ async def process_one_message(
                 "facility": aggregator.process_facility_row,
                 "transactionsalt": aggregator.process_transaction_row,
             }
-            for entry in manifest.entries:
-                stem = file_stem(entry.file_name)
+            for file_name, data in file_bytes.items():
+                stem = file_stem(file_name)
                 parser = PARSER_ROUTES.get(stem)
                 processor = row_processors.get(stem)
                 if parser is None or processor is None:
-                    # Defensive — manifest.py's V1 should have rejected this.
+                    # Defensive — unzip_drop's V1 should have rejected this.
                     raise ValidationError(
                         rule="V1",
-                        safe_message=f"no parser registered for {entry.file_name}",
-                        internal_details={"file_name": entry.file_name, "stem": stem},
+                        safe_message=f"no parser registered for {file_name}",
+                        internal_details={"file_name": file_name, "stem": stem},
                     )
-                data = file_bytes[entry.file_name]
                 for row in parser(data):
                     processor(row)
 
@@ -310,8 +329,8 @@ async def process_one_message(
             await run.complete(
                 db,
                 status="succeeded",
-                files_count=len(manifest.entries),
-                rows_in=manifest.total_rows,
+                files_count=len(drop.file_bytes),
+                rows_in=drop.total_rows,
                 rows_out=result.rows_written,
             )
             emit_event(
