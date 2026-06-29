@@ -2,7 +2,8 @@
 
 Operator-facing reference for the two Ventra SFTP feeds. Locked against
 Ventra's real spec (`Standard Data Extract - Files Specifications.xlsx`,
-received 2026-06-15).
+received 2026-06-15) and their 2026-06-22 follow-up (zip delivery, signed
+TranAmt, confirmed filenames).
 
 ## The two feeds
 
@@ -10,7 +11,7 @@ HHA runs **both** Ventra deliveries in parallel and reconciles them:
 
 | Feed | SFTP user | Path | Files | PHI | Lifecycle |
 |---|---|---|---|---|---|
-| **Standard Data Extract** (Option 1, row-level) | `ventrastdspec` | `vendor-inbound/ventra/stdspec/YYYY-MM-DD/` | 5 (below) | yes (stripped at edge) | 30 days |
+| **Standard Data Extract** (Option 1, row-level) | `ventrastdspec` | `vendor-inbound/ventra/stdspec/` (one **zip** per drop) | 5 CSVs inside `HHA_Extact_YYYYMMDD.zip` | yes (stripped at edge) | 30 days |
 | **Pre-aggregated** (Option 2) | `ventrapreagg` | `vendor-inbound/ventra/preagg/YYYY-MM-DD/` | 3 (collections/ar/physician) | no | 90 days |
 
 > SFTP local-user names are lowercase-alphanumeric (Azure requirement — no
@@ -25,8 +26,9 @@ HHA runs **both** Ventra deliveries in parallel and reconciles them:
 > Ventra's egress IPs with
 > `az storage account network-rule add -g rg-hha-dashboard-dev --account-name sthhavendordev5801224b --ip-address <ip>`.
 
-Both land on the same storage account; Event Grid fires on each feed's
-`_MANIFEST.csv`; separate Container Apps Jobs process each.
+Both land on the same storage account. Event Grid fires the **stdspec** job
+on the drop **`.zip`** and the **preagg** job on its `_MANIFEST.csv`;
+separate Container Apps Jobs process each.
 
 ## Standard Data Extract — the 5 files HHA ingests
 
@@ -74,32 +76,40 @@ A FacilityNo with no active mapping → the drop is **quarantined (V8)** until
 the mapping is added (fail-closed). A FacilityNo that maps to a non-FL site
 → **incident (V12 / ADR-005)**.
 
-## Manifest contract (both feeds)
+## Delivery contract
 
-Ventra writes `_MANIFEST.csv` **LAST**, after every data file is fully
-uploaded — this is the trigger. Format:
+### Standard Data Extract (stdspec) — single zip, no manifest
 
-```
-file_name,sha256,row_count
-Invoice.csv,<64-hex-sha256>,12345
-ChargeLines.csv,<64-hex-sha256>,98765
-Physician.csv,<64-hex-sha256>,42
-Facility.csv,<64-hex-sha256>,7
-TransactionsAlt.csv,<64-hex-sha256>,54321
-```
+Per Ventra's 2026-06-22 reply, the stdspec feed is **one zip per drop**
+(no `_MANIFEST.csv`):
 
-Rules:
-- **Manifest last** — Event Grid only fires on `_MANIFEST.csv`; a partial
-  drop never triggers a job.
-- **One folder per drop date** — `YYYY-MM-DD` (UTC).
-- File names are matched by **stem** (case + extension insensitive), so
-  `Invoice.csv` / `invoice.CSV` / `Invoice.txt` all resolve. The exact
-  delivered filename + extension + delimiter is an open confirmation item
-  (see below).
-- **FL only** — both feeds are Florida-only (ADR-005). Any non-FL facility
-  quarantines + raises an incident.
-- **Restate** — to correct a drop, re-deliver under the same date; the
-  pipeline detects the sha256 change (V13) and routes to manual review.
+- **Filename:** `HHA_Extact_YYYYMMDD.zip` (Ventra's spelling — "Extact";
+  the pipeline tolerates "Extract" too). The `YYYYMMDD` is the drop /
+  business date and is parsed as the drop date.
+- **Contents:** exactly 5 comma-delimited CSVs with header rows —
+  `Invoice.csv`, `ChargeLines.csv`, `Physician.csv`, `Facility.csv`,
+  `TransactionsAlt.csv` (matched by stem, case-insensitive; `__MACOSX/` +
+  dotfile noise is ignored).
+- **Trigger:** Event Grid fires on the `.zip` BlobCreated event. The
+  `data.api` advanced filter (incl. `FlushWithClose`) ensures it only fires
+  once the upload is complete — never a partial zip.
+- **Integrity:** the zip's own per-member CRC32 is the integrity check
+  (validated on unzip). A corrupt member fails closed to quarantine (V1) —
+  this replaces the old per-file sha256/row_count manifest checks.
+- **Presence:** all 5 files must be in the zip (V2) or the drop quarantines.
+- **Restate:** to correct a drop, re-deliver a zip with the same date; the
+  pipeline dedups on the **zip's sha256** (V13) and routes a changed-content
+  re-send to manual review.
+- **Zip-bomb guard:** > 50 members or > 500 MB uncompressed → V1.
+
+### Pre-aggregated (preagg) — manifest-last (unchanged)
+
+The preagg feed keeps the `_MANIFEST.csv`-last contract: Ventra writes
+`_MANIFEST.csv` after the 3 data files; Event Grid fires on it.
+`file_name,sha256,row_count` per row; one folder per `YYYY-MM-DD` (UTC).
+
+**FL only** — both feeds are Florida-only (ADR-005). Any non-FL facility
+quarantines + raises an incident.
 
 ## Install the public keys + deploy
 
@@ -110,17 +120,26 @@ Rules:
 
 Prints the SFTP host + the two usernames to share back with Ventra.
 
-## Open confirmation items (ask Ventra)
+## Confirmation items
 
-1. **Exact delivered filenames + extension + delimiter** (`Invoice.csv`?
-   `.txt`? pipe-delimited?). The pipeline is stem/extension-tolerant but
-   the manifest `file_name` must match what's uploaded.
-2. **InsClass / InsuranceClass value vocabulary** — the exact strings
-   Ventra uses (to map → HHA's commercial/medicare/medicaid/selfpay/other).
-   The normalizer defaults unknown values to `other`.
-3. **TranAmt sign convention** — are payments positive or negative? The
-   aggregator currently uses magnitude (abs) per the fact tables'
-   non-negative columns; confirm against the first sample.
+Resolved by Ventra's 2026-06-22 reply:
+
+- ✅ **Filenames + format** — `Invoice` / `ChargeLines` / `Physician` /
+  `Facility` / `TransactionsAlt`, `.csv`, comma-delimited.
+- ✅ **Delivery** — single zip per drop (no `_MANIFEST.csv`) for stdspec.
+- ✅ **TranAmt sign** — signed (positive/negative). The aggregator nets
+  same-type reversals and stores column magnitudes; a net-negative payments
+  group fails closed as V10.
+
+Still open (asked in the 2026-06-22 reply):
+
+1. **Per-`TranType` sign convention** — Payment +, Refund −, Adjustment
+   sign, and Transfer handling — so HHA's net-collections math matches
+   Ventra's books.
+2. **InsuranceClass / PrimaryInsClass value vocabulary** — exact strings →
+   HHA's commercial/medicare/medicaid/selfpay/other. Unknown → `other`.
+3. **Zip atomicity** — confirm the zip is visible only when fully written
+   (rename-on-complete or visibility-on-close).
 4. **Pre-aggregated feed also keys on FacilityNo 2284-2290** (assumed yes).
 
 ## Quarantine triage
@@ -129,8 +148,9 @@ A quarantined drop copies its files to
 `vendor-quarantine/ventra/stdspec/YYYY-MM-DD/` plus a `_REJECT_REASON.txt`
 sidecar (PHI-free). The sidecar's INCIDENT CLASS line says which playbook
 to follow:
-- `validation_failure` — schema / manifest issue. Email ops; coordinate
-  with Ventra on the file.
+
+- `validation_failure` — schema / zip / presence issue (V1, V2, V5, V10,
+  V13). Email ops; coordinate with Ventra on the file.
 - `adr_005` — non-FL facility. Security playbook + investigate.
 - `v15_phi_leak` — a PHI column survived the strip layer. **Deploy revert +
   24h HIPAA-reportability review.** Should be impossible given the
