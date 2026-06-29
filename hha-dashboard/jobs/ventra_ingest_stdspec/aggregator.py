@@ -52,6 +52,15 @@ column. The emitted aggregates carry only fact-table columns.
 Net-revenue formula (locked 2026-05-25, CFO + Sandy sign-off):
   net_revenue = payments_received - payer_refunds - patient_refunds
 Single place to update if Ventra's reply changes the definition.
+
+Signed amounts (Ventra confirmed 2026-06-22): ``TranAmt`` carries its
+natural sign — a payment reversal is a negative Payment, etc. Buckets
+accumulate the SIGNED sum so same-type reversals net correctly, then emit
+takes the column magnitude (the fact columns are non-negative; net_revenue
++ AR formulas encode direction). Payments are expected to net non-negative;
+a negative net fails closed as V10 rather than abs-flipping (which would
+overstate collections). The exact per-TranType sign convention is the open
+clarification in the 2026-06-22 reply.
 """
 
 from __future__ import annotations
@@ -61,6 +70,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+from .exceptions import ValidationError
 from .parsers.standard_spec import (
     ChargeLineRow,
     FacilityRow,
@@ -154,13 +164,21 @@ def _first_of_month(d: date) -> date:
 
 
 def _classify_transaction(row: TransactionRow) -> tuple[str, Decimal]:
-    """Map a transaction to a collections bucket + a non-negative magnitude.
+    """Map a transaction to a collections bucket + its SIGNED amount.
 
-    Returns ``(bucket, amount)`` where bucket is one of:
+    Returns ``(bucket, signed_amount)`` where bucket is one of:
       'payments_received' | 'contractual_adjustments' | 'write_offs'
       | 'payer_refunds' | 'patient_refunds' | 'ignore'
-    Amount is ``abs(tran_amt)`` (the fact table stores non-negative
-    magnitudes; sign convention in the bucket is fixed by the column).
+
+    Ventra confirmed (2026-06-22) that ``TranAmt`` carries its natural sign
+    — a payment reversal is a negative Payment, etc. We preserve the sign
+    here and let the aggregator NET same-type reversals before taking the
+    column magnitude at emit. This fixes the prior ``abs()``-per-row bug
+    that double-counted a payment and its reversal as two positives.
+
+    The exact per-``TranType`` sign convention is the one open clarification
+    in the 2026-06-22 reply; the emit-stage magnitudes + the V10
+    net-negative-payments guard make the interim handling fail-closed.
 
     Transfers and unknown types map to 'ignore' (internal AR movement,
     net-zero to collections).
@@ -168,7 +186,7 @@ def _classify_transaction(row: TransactionRow) -> tuple[str, Decimal]:
     ttype = (row.tran_type or "").strip().lower()
     comment = (row.tran_comment or "").strip().lower()
     source = (row.tran_source or "").strip().lower()
-    amt = abs(row.tran_amt)
+    amt = row.tran_amt  # signed — do NOT abs here; netting happens at emit
 
     if ttype == "payment":
         return "payments_received", amt
@@ -361,13 +379,18 @@ class Aggregator:
                 )
 
             # ---- AR snapshot: per-invoice open balance + age ----
+            # Buckets accumulate SIGNED amounts (reversals net within a
+            # bucket); take the per-invoice magnitude so the accounting
+            # formula reads in positive dollars: charges reduce by money
+            # applied (payments + adjustments + write-offs) and re-open by
+            # refunds paid back out.
             open_balance = (
                 st.gross_charges
-                - st.payments_received
-                - st.contractual_adjustments
-                - st.write_offs
-                + st.payer_refunds
-                + st.patient_refunds
+                - abs(st.payments_received)
+                - abs(st.contractual_adjustments)
+                - abs(st.write_offs)
+                + abs(st.payer_refunds)
+                + abs(st.patient_refunds)
             )
             if open_balance != 0:
                 age_days = (
@@ -379,20 +402,43 @@ class Aggregator:
                 ar[(self.drop_date, site_id, bucket)] += open_balance
 
         # ---- materialize collections ----
+        # Each bucket is a SIGNED sum (reversals already netted). Payments
+        # are expected to net non-negative under the assumed convention
+        # (Payment +, reversal −); a negative net signals a sign-convention
+        # mismatch or a data anomaly — fail closed (V10) rather than abs-flip
+        # it and silently overstate collections. Refunds + adjustments are
+        # stored as positive magnitudes (the fact columns are non-negative;
+        # the net_revenue / AR formulas encode the direction).
         coll_rows: list[CollectionsAggregate] = []
         for (cdate, site_id, payer), acc in sorted(collections.items()):
-            net = acc.payments_received - acc.payer_refunds - acc.patient_refunds
+            payments = acc.payments_received
+            if payments < 0:
+                raise ValidationError(
+                    rule="V10",
+                    safe_message=(
+                        "payments net negative for a (date, facility, payer) "
+                        "group — verify Ventra TranAmt sign convention"
+                    ),
+                    internal_details={
+                        "date": cdate.isoformat(),
+                        "facility_no": site_id,
+                        "payer_class": payer,
+                    },
+                )
+            payer_refunds = abs(acc.payer_refunds)
+            patient_refunds = abs(acc.patient_refunds)
+            net = payments - payer_refunds - patient_refunds
             coll_rows.append(
                 CollectionsAggregate(
                     date=cdate,
                     facility_no=site_id,
                     payer_class=payer,
                     gross_charges=acc.gross_charges,
-                    payments_received=acc.payments_received,
-                    contractual_adjustments=acc.contractual_adjustments,
-                    write_offs=acc.write_offs,
-                    payer_refunds=acc.payer_refunds,
-                    patient_refunds=acc.patient_refunds,
+                    payments_received=payments,
+                    contractual_adjustments=abs(acc.contractual_adjustments),
+                    write_offs=abs(acc.write_offs),
+                    payer_refunds=payer_refunds,
+                    patient_refunds=patient_refunds,
                     net_revenue=net,
                 )
             )
