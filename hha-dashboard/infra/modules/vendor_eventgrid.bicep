@@ -45,8 +45,11 @@ param deadletter_container_name string = 'vendor-deadletter'
 @description('Subject filter prefix. Matches blobs under /vendor-inbound/ventra/. Adjust if the container or vendor folder ever changes.')
 param subject_prefix string = '/blobServices/default/containers/vendor-inbound/blobs/ventra/'
 
-@description('Subject filter suffix. Matches only manifest files so partial drops never trigger.')
+@description('Subject filter suffix for the legacy + preagg paths. Matches only manifest files so partial drops never trigger.')
 param subject_suffix string = '/_MANIFEST.csv'
+
+@description('Phase 4Z — subject filter suffix for the Standard Spec (stdspec) path. Ventra delivers a single zip per drop (no _MANIFEST.csv) per their 2026-06-22 reply, so the stdspec trigger fires on the zip blob itself. The advancedFilter on data.api (incl. FlushWithClose, the SFTP/ADLS write-completion event) ensures we only fire once the zip is fully written.')
+param stdspec_subject_suffix string = '.zip'
 
 @description('Max delivery attempts before dead-letter. 5 = ~30 min retry window with default backoff.')
 @minValue(1)
@@ -66,7 +69,7 @@ param queue_message_ttl_seconds int = 604800
 @description('Phase 4 hybrid — enable the legacy single-path subscription (matches /vendor-inbound/ventra/<any>/_MANIFEST.csv). True for backward compatibility with PR #54. Flip to false once the hybrid stdspec + preagg subscriptions are active and the legacy ventra SFTP user is retired (H14). Leaving this true alongside the new subscriptions causes duplicate triggers — see filter overlap notes in the module body.')
 param enable_legacy_subscription bool = true
 
-@description('Phase 4 hybrid — enable the row-level Standard Spec subscription. Filters /vendor-inbound/ventra/stdspec/<YYYY-MM-DD>/_MANIFEST.csv. Routes to q-ventra-stdspec-manifests.')
+@description('Phase 4Z — enable the row-level Standard Spec subscription. Filters /vendor-inbound/ventra/stdspec/...*.zip (single zip per drop, no manifest). Routes to q-ventra-stdspec-manifests.')
 param enable_stdspec_subscription bool = false
 
 @description('Phase 4 hybrid — enable the pre-aggregated subscription. Filters /vendor-inbound/ventra/preagg/<YYYY-MM-DD>/_MANIFEST.csv. Routes to q-ventra-preagg-manifests.')
@@ -200,11 +203,15 @@ resource ventraManifestSubscription 'Microsoft.EventGrid/systemTopics/eventSubsc
   }
 }
 
-// Phase 4 hybrid — Standard Spec (row-level) subscription.
-// Filter narrows to /vendor-inbound/ventra/stdspec/<YYYY-MM-DD>/_MANIFEST.csv.
-// Routes to a dedicated queue so backpressure / pause / drain affects only
-// this pipeline. The downstream Container App Job for this queue runs the
-// V15 PHI-denial validators before any aggregation.
+// Phase 4Z — Standard Spec (row-level) subscription.
+// Filter narrows to /vendor-inbound/ventra/stdspec/...<HHA_Extact_YYYYMMDD>.zip.
+// Ventra delivers a single zip per drop (no _MANIFEST.csv) per their
+// 2026-06-22 reply, so the trigger fires on the zip blob itself; the zip's
+// own CRC provides per-file integrity (replacing the manifest sha256/row
+// checks). Routes to a dedicated queue so backpressure / pause / drain
+// affects only this pipeline. The downstream Container App Job for this
+// queue downloads + unzips in memory, then runs the V15 PHI-denial
+// validators before any aggregation.
 resource ventraStdspecSubscription 'Microsoft.EventGrid/systemTopics/eventSubscriptions@2023-12-15-preview' = if (enable_stdspec_subscription) {
   parent: systemTopic
   name: 'sub-ventra-stdspec'
@@ -222,7 +229,7 @@ resource ventraStdspecSubscription 'Microsoft.EventGrid/systemTopics/eventSubscr
         'Microsoft.Storage.BlobCreated'
       ]
       subjectBeginsWith: '${subject_prefix}stdspec/'
-      subjectEndsWith: subject_suffix
+      subjectEndsWith: stdspec_subject_suffix
       advancedFilters: [
         {
           operatorType: 'StringContains'
