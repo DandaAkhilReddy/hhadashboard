@@ -120,6 +120,57 @@ quarantines + raises an incident.
 
 Prints the SFTP host + the two usernames to share back with Ventra.
 
+## Checking connection activity (who connected, from what IP)
+
+The **Transactions** platform metric is always-on but has **no source IP** —
+it can tell you "something happened" but not "core-prd-mft01 connected." For
+a definitive, IP-stamped answer you need the diagnostic **logs**.
+
+Connection logging was enabled 2026-06-29 (dev) — currently ad-hoc via CLI,
+**not yet codified in Bicep (TODO: add a `diagnosticSettings` on the vendor
+blob service gated on `enable_monitor`):**
+
+- Log Analytics workspace: `log-hha-vendor-dev` (RG `rg-hha-dashboard-dev`).
+- Diagnostic setting `vendor-sftp-diag` on the blob service →
+  `StorageRead` / `StorageWrite` / `StorageDelete`.
+
+It is **forward-only** (no retroactive capture). Logs appear in the
+workspace ~5–15 min after an event. Query (Logs blade on
+`log-hha-vendor-dev`):
+
+```kql
+StorageBlobLogs
+| where TimeGenerated > ago(2h)
+| where CallerIpAddress startswith "52.177.111.231"   // core-prd-mft01 egress
+| project TimeGenerated, CallerIpAddress, AuthenticationType, OperationName, Uri, StatusCode, StatusText
+| order by TimeGenerated desc
+```
+
+`AuthenticationType == "LocalUserPublicKey"` = an SFTP key-auth connection;
+`StatusCode`/`StatusText` shows success vs auth/permission failure. Recreate
+the setting if the account is redeployed:
+
+```bash
+# Git Bash: MSYS_NO_PATHCONV=1 is required or the leading-slash resource IDs get mangled.
+MSYS_NO_PATHCONV=1 az monitor diagnostic-settings create --name vendor-sftp-diag \
+  --resource "<account-id>/blobServices/default" \
+  --workspace "<log-hha-vendor-dev-id>" \
+  --logs '[{"category":"StorageRead","enabled":true},{"category":"StorageWrite","enabled":true},{"category":"StorageDelete","enabled":true}]'
+```
+
+## Allowlisting a vendor egress IP
+
+The firewall is deny-by-default; a vendor can't connect until their egress
+IP is allowlisted:
+
+```bash
+az storage account network-rule add -g rg-hha-dashboard-dev \
+  --account-name sthhavendordev5801224b --ip-address <vendor-egress-ip>
+```
+
+Current dev allowlist (2026-06-29): `71.227.196.232` (workstation),
+`52.177.111.231` + `4.151.247.225` (Ventra `core-prd-mft01`).
+
 ## Confirmation items
 
 Resolved by Ventra's 2026-06-22 reply:
