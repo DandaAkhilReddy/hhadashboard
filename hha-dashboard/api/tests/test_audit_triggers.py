@@ -660,11 +660,11 @@ async def _seed_fact_collections_daily(s: AsyncSession, ctx: _TableOpCtx) -> int
             "INSERT INTO entries.fact_collections_daily ("
             "date, facility_no, payer_class, "
             "gross_charges, payments_received, net_revenue, "
-            "ingest_run_id"
+            "source_system, ingest_run_id"
             ") VALUES ("
             ":d, :fn, 'commercial', "
             "10000, 8000, 7500, "
-            ":rid"
+            "'VENTRA_FL_PREAGG', :rid"
             ") RETURNING id"
         ),
         {"d": date(2026, 6, 1), "fn": 901, "rid": _test_ingest_run_uuid(ctx.upn)},
@@ -703,10 +703,10 @@ async def _seed_fact_ar_snapshot(s: AsyncSession, ctx: _TableOpCtx) -> int:
         text(
             "INSERT INTO entries.fact_ar_snapshot ("
             "snapshot_date, facility_no, aging_bucket, "
-            "outstanding_amount, ingest_run_id"
+            "outstanding_amount, source_system, ingest_run_id"
             ") VALUES ("
             ":d, :fn, '0-30', "
-            "50000, :rid"
+            "50000, 'VENTRA_FL_PREAGG', :rid"
             ") RETURNING id"
         ),
         {"d": date(2026, 6, 1), "fn": 902, "rid": _test_ingest_run_uuid(ctx.upn)},
@@ -742,10 +742,12 @@ async def _seed_fact_revenue_by_physician_mo(
         text(
             "INSERT INTO entries.fact_revenue_by_physician_mo ("
             "month, physician_npi, facility_no, "
-            "encounters_count, revenue_attributed, ingest_run_id"
+            "encounters_count, revenue_attributed, "
+            "source_system, ingest_run_id"
             ") VALUES ("
             ":m, '1234567890', :fn, "
-            "50, 75000, :rid"
+            "50, 75000, "
+            "'VENTRA_FL_PREAGG', :rid"
             ") RETURNING id"
         ),
         {"m": date(2026, 6, 1), "fn": 903, "rid": _test_ingest_run_uuid(ctx.upn)},
