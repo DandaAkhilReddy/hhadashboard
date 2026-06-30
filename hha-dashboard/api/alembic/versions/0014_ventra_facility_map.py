@@ -127,7 +127,7 @@ def upgrade() -> None:
             sa.text(
                 "INSERT INTO dims.facility_codes "
                 "(ventra_facility_no, site_id, effective_from, effective_through) "
-                "SELECT :ventra_no, s.id, :eff_from, NULL "
+                "SELECT :ventra_no, s.id, CAST(:eff_from AS DATE), NULL "
                 "FROM masters.sites s "
                 "WHERE s.name = :hha_name"
             ).bindparams(
