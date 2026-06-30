@@ -11,6 +11,7 @@ from .alerts import AlertLog, AlertSubscription, CredentialAlertLog
 from .audit import AuditLog
 from .base import Base, DataClass, TimestampMixin
 from .census_credentials import CensusCredential
+from .dims import FacilityCode
 from .entries import DailyEntry
 from .entries_clinical import WeeklyClinical
 from .entries_finance import MonthlyFinanceManual
@@ -26,6 +27,7 @@ __all__ = [
     "CredentialAlertLog",
     "DailyEntry",
     "DataClass",
+    "FacilityCode",
     "MonthlyFinanceManual",
     "TimestampMixin",
     "UploadLog",

@@ -8,6 +8,9 @@
 credentials.json
 **/azure-credentials.json
 .azure/
+# Federated-credential temp files written during Azure OIDC login (SECRET)
+.fed-cred-tmp.json
+**/.fed-cred*.json
 
 # ---- Python ----
 __pycache__/
@@ -76,8 +79,19 @@ infra/**/*.json
 
 # ---- Claude Code local-only artifacts ----
 .claude-local/
+.claude/
 
 # ---- Playwright ----
 test-results/
 playwright-report/
 playwright/.cache/
+
+# ---- Coverage / test output (regenerable) ----
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+
+# ---- Per-machine tools / binaries (not portable) ----
+jq.exe
+*.exe
