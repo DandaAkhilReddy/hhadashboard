@@ -290,6 +290,11 @@ def downgrade() -> None:
     # the restored CHECK. We refuse the downgrade if any are present.
     # -----------------------------------------------------------------------
     for table_name, _, _, _, _ in FACT_TABLES:
+        # NOTE: a PL/pgSQL ``DO $$ ... $$`` block accepts NO bind parameters
+        # (the body is opaque to the driver), so ``:stdspec_value`` would raise
+        # IndeterminateDatatype ("could not determine data type of parameter
+        # $1"). STDSPEC_VALUE is a fixed code constant (not user input), so we
+        # inline it as a quoted SQL literal — safe, no injection surface.
         op.execute(
             sa.text(
                 f"DO $$ "
@@ -297,13 +302,13 @@ def downgrade() -> None:
                 f"BEGIN "
                 f"  SELECT COUNT(*) INTO stdspec_count "
                 f"  FROM entries.{table_name} "
-                f"  WHERE source_system = :stdspec_value; "
+                f"  WHERE source_system = '{STDSPEC_VALUE}'; "
                 f"  IF stdspec_count > 0 THEN "
                 f"    RAISE EXCEPTION 'Cannot downgrade: % stdspec-tagged rows present in entries.{table_name}; "
                 f"manual cleanup required before downgrade', stdspec_count; "
                 f"  END IF; "
                 f"END $$;"
-            ).bindparams(stdspec_value=STDSPEC_VALUE)
+            )
         )
         op.execute(
             sa.text(
