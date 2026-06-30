@@ -40,10 +40,6 @@ AUDITED_TABLES: frozenset[tuple[str, str]] = frozenset(
         ("entries", "fact_collections_daily"),
         ("entries", "fact_ar_snapshot"),
         ("entries", "fact_revenue_by_physician_mo"),
-        # Added in migration 0014 (Ventra facility mapping). A remap could
-        # redirect which HHA site a Ventra drop lands on — security-relevant,
-        # so the mapping table is audited.
-        ("dims", "facility_codes"),
     }
 )
 
