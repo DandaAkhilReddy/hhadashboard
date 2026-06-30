@@ -39,6 +39,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entries_ventra import (
+    SOURCE_PREAGG,
     FactArSnapshot,
     FactCollectionsDaily,
     FactRevenueByPhysicianMo,
@@ -235,13 +236,14 @@ async def ingest_drop(
                     "payer_refunds": r.payer_refunds,
                     "patient_refunds": r.patient_refunds,
                     "net_revenue": r.net_revenue,
+                    "source_system": SOURCE_PREAGG,
                     "ingest_run_id": run_id,
                 }
                 for r in rows
             ]
             stmt = pg_insert(FactCollectionsDaily).values(values)
             stmt = stmt.on_conflict_do_update(
-                index_elements=["date", "facility_no", "payer_class"],
+                index_elements=["date", "facility_no", "payer_class", "source_system"],
                 set_={col: stmt.excluded[col] for col in _MUTABLE_COLLECTIONS},
             )
             await db.execute(stmt)
@@ -257,13 +259,19 @@ async def ingest_drop(
                     "facility_no": r.facility_no,
                     "aging_bucket": r.aging_bucket,
                     "outstanding_amount": r.outstanding_amount,
+                    "source_system": SOURCE_PREAGG,
                     "ingest_run_id": run_id,
                 }
                 for r in rows
             ]
             stmt = pg_insert(FactArSnapshot).values(values)
             stmt = stmt.on_conflict_do_update(
-                index_elements=["snapshot_date", "facility_no", "aging_bucket"],
+                index_elements=[
+                    "snapshot_date",
+                    "facility_no",
+                    "aging_bucket",
+                    "source_system",
+                ],
                 set_={col: stmt.excluded[col] for col in _MUTABLE_AR_SNAPSHOT},
             )
             await db.execute(stmt)
@@ -282,13 +290,19 @@ async def ingest_drop(
                     "total_rvu": r.total_rvu,
                     "total_work_rvu": r.total_work_rvu,
                     "revenue_attributed": r.revenue_attributed,
+                    "source_system": SOURCE_PREAGG,
                     "ingest_run_id": run_id,
                 }
                 for r in rows
             ]
             stmt = pg_insert(FactRevenueByPhysicianMo).values(values)
             stmt = stmt.on_conflict_do_update(
-                index_elements=["month", "physician_npi", "facility_no"],
+                index_elements=[
+                    "month",
+                    "physician_npi",
+                    "facility_no",
+                    "source_system",
+                ],
                 set_={col: stmt.excluded[col] for col in _MUTABLE_PHYSICIAN_MO},
             )
             await db.execute(stmt)
