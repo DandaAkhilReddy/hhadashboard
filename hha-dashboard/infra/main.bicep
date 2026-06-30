@@ -139,6 +139,25 @@ param enable_sftp bool = false
 @description('Ventra SFTP public SSH key (full OpenSSH-format public key content). Only consumed when enable_sftp is true. Rotated quarterly via Key Vault.')
 param ventra_sftp_public_key string = ''
 
+@description('Phase 4 hybrid — enable the row-level Standard Spec SFTP user (ventra-stdspec, home dir vendor-inbound/ventra/stdspec). PHI-bearing path. Requires enable_sftp + a public key.')
+param enable_ventra_stdspec bool = false
+
+@secure()
+@description('Phase 4 hybrid — Ventra public key for the stdspec (row-level / PHI) SFTP user. Separate from the preagg key by design. Stored in KV as ventra-stdspec-sftp-public-key.')
+param ventra_stdspec_sftp_public_key string = ''
+
+@description('Phase 4 hybrid — days after which vendor-inbound/ventra/stdspec/ blobs auto-delete. 30 (vs 90 elsewhere) for PHI minimization per ADR-001.')
+@minValue(0)
+@maxValue(90)
+param vendor_stdspec_lifecycle_delete_days int = 30
+
+@description('Phase 4 hybrid — enable the pre-aggregated SFTP user (ventra-preagg, home dir vendor-inbound/ventra/preagg). Requires enable_sftp + a public key.')
+param enable_ventra_preagg bool = false
+
+@secure()
+@description('Phase 4 hybrid — Ventra public key for the preagg (pre-aggregated / no-PHI) SFTP user. Separate from the stdspec key by design. Stored in KV as ventra-preagg-sftp-public-key.')
+param ventra_preagg_sftp_public_key string = ''
+
 @description('Enable Event Grid system topic + manifest subscription + Storage Queue on the vendor-storage account. Requires enable_vendor_storage = true. When this is false the vendor-storage account still exists but blob events are silently dropped.')
 param enable_vendor_eventgrid bool = false
 
@@ -297,6 +316,11 @@ module vendorStorage './modules/vendor_storage.bicep' = if (enable_vendor_storag
     vendor_lifecycle_delete_days: vendor_storage_lifecycle_delete_days
     enable_sftp: enable_sftp
     ventra_sftp_public_key: ventra_sftp_public_key
+    enable_ventra_stdspec: enable_ventra_stdspec
+    ventra_stdspec_sftp_public_key: ventra_stdspec_sftp_public_key
+    vendor_stdspec_lifecycle_delete_days: vendor_stdspec_lifecycle_delete_days
+    enable_ventra_preagg: enable_ventra_preagg
+    ventra_preagg_sftp_public_key: ventra_preagg_sftp_public_key
     deployer_workstation_ip: deployer_workstation_ip
     pe_subnet_id: enable_vnet ? vnet!.outputs.pe_subnet_id : ''
     tags: tags

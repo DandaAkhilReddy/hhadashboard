@@ -89,6 +89,32 @@ param app_insights_connection_string string = ''
 @description('Ops recipient list for ventra_ingest notifications (success / quarantine / failure / incident). Comma-separated email addresses.')
 param ventra_ops_email_recipients string = 'areddy@hhamedicine.com'
 
+// ---------------------------------------------------------------------------
+// Phase 4 hybrid — ventra_ingest_stdspec (row-level / PHI-bearing path)
+// ---------------------------------------------------------------------------
+
+@description('Phase 4 hybrid — enable the row-level Standard Spec Container Apps Job. Gated separately from enable_ventra_ingest_job so the pre-agg path can stay live while the stdspec image is being baked. Requires enable_vendor_storage + the stdspec queue in vendor_eventgrid.bicep.')
+param enable_ventra_ingest_stdspec_job bool = false
+
+@description('Phase 4 hybrid — container image for ventra_ingest_stdspec. Separate image from the pre-aggregated job because the source tree lives in jobs/ventra_ingest_stdspec/ with PHI-safety infrastructure (V15 denylist, structlog scrubber, SafeMessageError base). Replace placeholder with acrhha{env}.azurecr.io/ventra-ingest-stdspec:{sha} once CI image-push lands.')
+param ventra_ingest_stdspec_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
+@description('Phase 4 hybrid — KEDA queue this job binds to. Must match the stdspec_queue_name output from vendor_eventgrid.bicep.')
+param stdspec_manifest_queue_name string = 'q-ventra-stdspec-manifests'
+
+// ---------------------------------------------------------------------------
+// Phase 4 hybrid — ventra_reconcile (daily cross-source reconciliation cron)
+// ---------------------------------------------------------------------------
+
+@description('Phase 4 hybrid — enable the daily reconciliation cron. Reads same-day rows from both source_system values (VENTRA_FL_PREAGG vs VENTRA_FL_STDSPEC_AGG), computes per-tuple variance, writes to entries.ventra_recon. Only useful once both pipelines are running.')
+param enable_ventra_reconcile_job bool = false
+
+@description('Phase 4 hybrid — container image for ventra_reconcile. Replace placeholder with acrhha{env}.azurecr.io/ventra-reconcile:{sha} once CI image-push lands. Source tree: jobs/ventra_reconcile/.')
+param ventra_reconcile_image string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
+@description('Phase 4 hybrid — cron schedule for the reconciliation job. Default 14:00 ET (= 19:00 UTC during DST, 18:00 UTC during standard time) — runs AFTER both morning ingest drops have settled. NCRONTAB syntax (5-field). Adjust if either feed delivers later in the day.')
+param ventra_reconcile_schedule string = '0 19 * * *'
+
 @description('Tags applied to every resource.')
 param tags object = {}
 
@@ -362,6 +388,110 @@ resource ventraIngestJob 'Microsoft.App/jobs@2024-03-01' = if (enable_ventra_ing
   }
 }
 
+// =========================================================================
+// Phase 4 hybrid — ventra_ingest_stdspec (row-level / PHI-bearing path)
+//
+// Mirrors the pre-aggregated ventraIngestJob above with deltas:
+//   - Bound to q-ventra-stdspec-manifests (separate queue, separate
+//     KEDA scaler — backpressure on one path doesn't starve the other)
+//   - replicaTimeout: 900s (vs 600s for pre-agg) — row-level parsing +
+//     in-memory aggregation has higher per-drop cost
+//   - INGEST_PATH=stdspec env var: the job's main.py branches on this to
+//     load the stdspec parsers + V15 denylist + PHI-safety logging stack
+//   - container/job names suffixed with -stdspec for cross-job correlation
+//   - Resources still 0.5 vCPU / 1 GiB — aggregation is streamed, not
+//     slurped, so memory stays bounded even on big drops
+//
+// Authentication + MI pattern identical to ventraIngestJob — rbac.bicep
+// assigns Storage Blob Data Contributor + Queue Message Processor + KV
+// Secrets User to this job's principal in the same pattern.
+// =========================================================================
+
+resource ventraIngestStdspecJob 'Microsoft.App/jobs@2024-03-01' = if (enable_ventra_ingest_stdspec_job) {
+  name: 'job-ventra-ingest-stdspec-${env_name_prefix}'
+  location: location
+  tags: tags
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    environmentId: env.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Event'
+      replicaTimeout: 900
+      replicaRetryLimit: 3
+      eventTriggerConfig: {
+        replicaCompletionCount: 1
+        parallelism: 1
+        scale: {
+          minExecutions: 0
+          maxExecutions: 5
+          pollingInterval: 30
+          rules: [
+            {
+              name: 'q-ventra-stdspec-manifests-trigger'
+              type: 'azure-queue'
+              metadata: {
+                accountName: vendor_storage_account_name
+                queueName: stdspec_manifest_queue_name
+                queueLength: '1'
+              }
+              auth: [
+                {
+                  secretRef: 'vendor-storage-connection-string'
+                  triggerParameter: 'connection'
+                }
+              ]
+            }
+          ]
+        }
+      }
+      secrets: [
+        {
+          name: 'database-url'
+          value: database_url
+        }
+        {
+          name: 'app-insights-connection'
+          value: app_insights_connection_string
+        }
+        {
+          name: 'vendor-storage-connection-string'
+          value: enable_ventra_ingest_stdspec_job ? 'DefaultEndpointsProtocol=https;AccountName=${vendorStorageRef!.name};AccountKey=${vendorStorageRef!.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}' : ''
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'ventra-ingest-stdspec'
+          image: ventra_ingest_stdspec_image
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            { name: 'ENV_NAME', value: env_name_prefix }
+            { name: 'INGEST_PATH', value: 'stdspec' }
+            { name: 'STORAGE_ACCOUNT', value: vendor_storage_account_name }
+            { name: 'MANIFEST_QUEUE_NAME', value: stdspec_manifest_queue_name }
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
+            { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'app-insights-connection' }
+            { name: 'AZURE_COMMUNICATION_ENDPOINT', value: azure_communication_endpoint }
+            { name: 'AZURE_COMMUNICATION_SENDER', value: azure_communication_sender }
+            { name: 'ALERT_EMAIL_FROM', value: azure_communication_sender }
+            { name: 'ALERT_EMAIL_TO_OPS', value: ventra_ops_email_recipients }
+            // Phase 4 stdspec marker — the job uses this to set the
+            // source_system column when writing to fact tables.
+            { name: 'SOURCE_SYSTEM_TAG', value: 'VENTRA_FL_STDSPEC_AGG' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
 @description('Container Apps environment resource ID — used by main.bicep to wire additional Job resources later.')
 output env_id string = env.id
 
@@ -385,3 +515,95 @@ output ventra_ingest_job_id string = enable_ventra_ingest_job ? ventraIngestJob!
 
 @description('ventra_ingest job principal ID (System-Assigned MI). Wire to Storage Blob Data Contributor on vendor-storage + Storage Queue Data Message Processor on q-ventra-manifests + Key Vault Secrets User on the KV via rbac.bicep.')
 output ventra_ingest_principal_id string = enable_ventra_ingest_job ? ventraIngestJob!.identity.principalId : ''
+
+@description('Phase 4 hybrid — ventra_ingest_stdspec job resource ID. Empty when disabled.')
+output ventra_ingest_stdspec_job_id string = enable_ventra_ingest_stdspec_job ? ventraIngestStdspecJob!.id : ''
+
+@description('Phase 4 hybrid — ventra_ingest_stdspec job principal ID (System-Assigned MI). Same role assignments needed as ventra_ingest, but scoped to the stdspec queue.')
+output ventra_ingest_stdspec_principal_id string = enable_ventra_ingest_stdspec_job ? ventraIngestStdspecJob!.identity.principalId : ''
+
+// =========================================================================
+// Phase 4 hybrid — ventra_reconcile (daily reconciliation cron)
+//
+// Per the plan's H16 spec — runs daily after both ingest paths settle.
+// Joins same-day rows from entries.fact_collections_daily on (date,
+// facility_no, payer_class), splitting by source_system, computes
+// stdspec_amount - preagg_amount per tuple, writes one row to
+// entries.ventra_recon per tuple with tier ∈ {match, minor, drift}.
+//
+// Trigger: Schedule (NOT Event) — fires once per day. No KEDA scaler.
+// Resources: 0.25 vCPU / 0.5 GiB — pure read-then-aggregate work, no
+// blob I/O. Replica timeout 600s; reconciliation of a single day rarely
+// exceeds 30s but headroom is cheap.
+//
+// MI needs the same Postgres user as the read-path API, but with INSERT
+// on entries.ventra_recon. App code calls audit.set_upn('ventra-reconcile@system')
+// so the audit trigger attributes correctly.
+// =========================================================================
+
+resource ventraReconcileJob 'Microsoft.App/jobs@2024-03-01' = if (enable_ventra_reconcile_job) {
+  name: 'job-ventra-reconcile-${env_name_prefix}'
+  location: location
+  tags: tags
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    environmentId: env.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Schedule'
+      replicaTimeout: 600
+      replicaRetryLimit: 2
+      scheduleTriggerConfig: {
+        cronExpression: ventra_reconcile_schedule
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      secrets: [
+        {
+          name: 'database-url'
+          value: database_url
+        }
+        {
+          name: 'app-insights-connection'
+          value: app_insights_connection_string
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'ventra-reconcile'
+          image: ventra_reconcile_image
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            { name: 'ENV_NAME', value: env_name_prefix }
+            { name: 'INGEST_PATH', value: 'reconcile' }
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
+            { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', secretRef: 'app-insights-connection' }
+            { name: 'AZURE_COMMUNICATION_ENDPOINT', value: azure_communication_endpoint }
+            { name: 'AZURE_COMMUNICATION_SENDER', value: azure_communication_sender }
+            { name: 'ALERT_EMAIL_FROM', value: azure_communication_sender }
+            { name: 'ALERT_EMAIL_TO_OPS', value: ventra_ops_email_recipients }
+            // Drift threshold tiers (USD). The job tags rows accordingly:
+            //   |diff| < $1     -> match
+            //   $1 to $100      -> minor  (logged, no email)
+            //   |diff| > $100   -> drift  (logged + ACS email digest)
+            { name: 'RECON_MINOR_THRESHOLD_USD', value: '1' }
+            { name: 'RECON_DRIFT_THRESHOLD_USD', value: '100' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
+@description('Phase 4 hybrid — ventra_reconcile cron job resource ID. Empty when disabled.')
+output ventra_reconcile_job_id string = enable_ventra_reconcile_job ? ventraReconcileJob!.id : ''
+
+@description('Phase 4 hybrid — ventra_reconcile job principal ID. Needs SELECT + INSERT on entries.ventra_recon, SELECT on entries.fact_collections_daily, and Key Vault Secrets User on the KV (same secrets as the ingest jobs).')
+output ventra_reconcile_principal_id string = enable_ventra_reconcile_job ? ventraReconcileJob!.identity.principalId : ''
