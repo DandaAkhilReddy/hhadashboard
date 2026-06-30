@@ -127,13 +127,19 @@ def upgrade() -> None:
             sa.text(
                 "INSERT INTO dims.facility_codes "
                 "(ventra_facility_no, site_id, effective_from, effective_through) "
-                "SELECT :ventra_no, s.id, CAST(:eff_from AS DATE), NULL "
+                # Explicit CASTs: bound params in a SELECT projection have no
+                # target column for Postgres to infer their type from, so a
+                # bare ``:ventra_no`` / ``:eff_from`` raises IndeterminateDatatype.
+                # SQLAlchemy's bindparam type_= does NOT emit a SQL cast — only
+                # an explicit CAST(...) in the SQL does.
+                "SELECT CAST(:ventra_no AS INTEGER), s.id, "
+                "CAST(:eff_from AS DATE), NULL "
                 "FROM masters.sites s "
                 "WHERE s.name = :hha_name"
             ).bindparams(
-                sa.bindparam("ventra_no", ventra_no, type_=sa.Integer()),
-                sa.bindparam("hha_name", hha_name, type_=sa.String()),
-                sa.bindparam("eff_from", SEED_EFFECTIVE_FROM, type_=sa.String()),
+                ventra_no=ventra_no,
+                hha_name=hha_name,
+                eff_from=SEED_EFFECTIVE_FROM,
             )
         )
 
