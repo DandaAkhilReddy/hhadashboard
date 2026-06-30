@@ -127,13 +127,13 @@ def upgrade() -> None:
             sa.text(
                 "INSERT INTO dims.facility_codes "
                 "(ventra_facility_no, site_id, effective_from, effective_through) "
-                "SELECT :ventra_no, s.id, :eff_from, NULL "
+                "SELECT :ventra_no, s.id, CAST(:eff_from AS DATE), NULL "
                 "FROM masters.sites s "
                 "WHERE s.name = :hha_name"
             ).bindparams(
-                ventra_no=ventra_no,
-                hha_name=hha_name,
-                eff_from=SEED_EFFECTIVE_FROM,
+                sa.bindparam("ventra_no", ventra_no, type_=sa.Integer()),
+                sa.bindparam("hha_name", hha_name, type_=sa.String()),
+                sa.bindparam("eff_from", SEED_EFFECTIVE_FROM, type_=sa.String()),
             )
         )
 
