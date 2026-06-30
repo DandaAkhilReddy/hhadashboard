@@ -1,45 +1,26 @@
-"""Ventra fact-table models — dual-source (Phase 4 hybrid).
+"""Ventra pre-aggregated fact-table models per ADR-006.
 
-Mirrors migrations 0011 + 0013 — three Tier-A fact tables in schema
-``entries`` receiving aggregated data from two parallel Ventra pipelines:
+Mirrors migration 0011 verbatim — three Tier-A fact tables in schema
+``entries`` receiving daily pre-aggregated CSVs from Ventra:
 
-  FactCollectionsDaily         — (date, facility_no, payer_class, source_system)
-  FactArSnapshot                — (snapshot_date, facility_no, aging_bucket, source_system)
-  FactRevenueByPhysicianMo      — (month, physician_npi, facility_no, source_system)
+  FactCollectionsDaily         — (date, facility_no, payer_class)
+  FactArSnapshot                — (snapshot_date, facility_no, aging_bucket)
+  FactRevenueByPhysicianMo      — (month, physician_npi, facility_no)
 
-``source_system`` carries the provenance tag:
+All columns are ``data_class=A`` — pre-aggregated by Ventra at source, no
+patient or claim linkage by construction. The CI test
+``test_schema_classification.py`` keeps it that way.
 
-  ``VENTRA_FL_PREAGG``        — Ventra's pre-aggregated extract (ADR-006).
-  ``VENTRA_FL_STDSPEC_AGG``   — HHA's in-memory aggregation of Ventra's
-                                row-level Standard Data Extract. PHI is
-                                stripped at the parser layer (V15); only
-                                Tier-A aggregates ever reach this table.
-
-The dual CHECK constraint (``*_source_system_dual``) accepts either value
-and rejects everything else. The natural-key UNIQUE constraint is widened
-to include ``source_system`` so both pipelines coexist per tuple — the
-reconciliation job in ``jobs/ventra_reconcile/`` joins on the original
-natural key minus source_system.
-
-All columns are ``data_class=A`` — pre-aggregated by construction; no
-patient or claim linkage by either pipeline. The CI test
-``test_schema_classification.py`` keeps it that way. Per ADR-001 the
-stdspec path enforces this at four layers (V15 forbidden-column denial
-before strip, after strip, at telemetry export, and at DB write).
-
-``state`` is locked to ``'FL'`` by DB DEFAULT + CHECK — both pipelines
-are FL-only (ADR-005). The application code never sets it.
-
-``source_system`` is intentionally set by app code (no server_default) so
-the stdspec writer must pass ``VENTRA_FL_STDSPEC_AGG`` explicitly and the
-preagg writer must pass ``VENTRA_FL_PREAGG`` explicitly. Forcing the
-explicit set prevents a silent default-wins bug if either path is
-misconfigured.
+``source_system`` and ``state`` are intentionally NOT mutable from client
+code — the DB CHECK constraints + DEFAULTs from migration 0011 lock them
+to ``'VENTRA_FL_ATHENA'`` and ``'FL'`` respectively. The C12 writer never
+passes those values; the DEFAULT kicks in on INSERT. The DB CHECK protects
+against malicious INSERTs and configuration drift.
 
 ``ingest_run_id`` is the UUID of the ops.ingest_run row that wrote this
 fact-table row. No FK constraint (the ops schema is independently
 evolvable per migration 0012's rationale) — population is enforced at
-the writer layer in each pipeline's ``ingest.py``.
+the writer layer in ``jobs/ventra_ingest/ingest.py``.
 """
 
 from __future__ import annotations
@@ -75,7 +56,7 @@ class FactCollectionsDaily(Base, TimestampMixin):
     __tablename__ = "fact_collections_daily"
     __table_args__ = (
         UniqueConstraint(
-            "date", "facility_no", "payer_class", "source_system",
+            "date", "facility_no", "payer_class",
             name="uq_collections_daily_natural",
         ),
         CheckConstraint(
@@ -88,8 +69,8 @@ class FactCollectionsDaily(Base, TimestampMixin):
             name="collections_payments_received_non_negative",
         ),
         CheckConstraint(
-            "source_system IN ('VENTRA_FL_PREAGG', 'VENTRA_FL_STDSPEC_AGG')",
-            name="collections_source_system_dual",
+            "source_system = 'VENTRA_FL_ATHENA'",
+            name="collections_source_system_locked",
         ),
         CheckConstraint("state = 'FL'", name="collections_state_fl_only"),
         Index("ix_fact_collections_daily_date", "date"),
@@ -127,12 +108,11 @@ class FactCollectionsDaily(Base, TimestampMixin):
         Numeric(18, 2), nullable=False, info={"data_class": A}
     )
 
-    # Provenance tag — explicitly set per pipeline. No server_default; the
-    # writer MUST pass either 'VENTRA_FL_PREAGG' or 'VENTRA_FL_STDSPEC_AGG'.
+    # Server-default-driven invariants — NEVER passed by client code.
     source_system: Mapped[str] = mapped_column(
-        String(30), nullable=False, info={"data_class": A},
+        String(30), nullable=False, server_default="VENTRA_FL_ATHENA",
+        info={"data_class": A},
     )
-    # State stays server-default-locked; both pipelines are FL-only (ADR-005).
     state: Mapped[str] = mapped_column(
         String(2), nullable=False, server_default="FL", info={"data_class": A}
     )
@@ -152,7 +132,7 @@ class FactArSnapshot(Base, TimestampMixin):
     __tablename__ = "fact_ar_snapshot"
     __table_args__ = (
         UniqueConstraint(
-            "snapshot_date", "facility_no", "aging_bucket", "source_system",
+            "snapshot_date", "facility_no", "aging_bucket",
             name="uq_ar_snapshot_natural",
         ),
         CheckConstraint(
@@ -164,8 +144,8 @@ class FactArSnapshot(Base, TimestampMixin):
             name="ar_outstanding_non_negative_except_credit",
         ),
         CheckConstraint(
-            "source_system IN ('VENTRA_FL_PREAGG', 'VENTRA_FL_STDSPEC_AGG')",
-            name="ar_source_system_dual",
+            "source_system = 'VENTRA_FL_ATHENA'",
+            name="ar_source_system_locked",
         ),
         CheckConstraint("state = 'FL'", name="ar_state_fl_only"),
         Index("ix_fact_ar_snapshot_date", "snapshot_date"),
@@ -187,7 +167,8 @@ class FactArSnapshot(Base, TimestampMixin):
     )
 
     source_system: Mapped[str] = mapped_column(
-        String(30), nullable=False, info={"data_class": A},
+        String(30), nullable=False, server_default="VENTRA_FL_ATHENA",
+        info={"data_class": A},
     )
     state: Mapped[str] = mapped_column(
         String(2), nullable=False, server_default="FL", info={"data_class": A}
@@ -209,7 +190,7 @@ class FactRevenueByPhysicianMo(Base, TimestampMixin):
     __tablename__ = "fact_revenue_by_physician_mo"
     __table_args__ = (
         UniqueConstraint(
-            "month", "physician_npi", "facility_no", "source_system",
+            "month", "physician_npi", "facility_no",
             name="uq_revenue_physician_mo_natural",
         ),
         CheckConstraint(
@@ -232,8 +213,8 @@ class FactRevenueByPhysicianMo(Base, TimestampMixin):
             name="physician_mo_total_work_rvu_non_negative",
         ),
         CheckConstraint(
-            "source_system IN ('VENTRA_FL_PREAGG', 'VENTRA_FL_STDSPEC_AGG')",
-            name="physician_mo_source_system_dual",
+            "source_system = 'VENTRA_FL_ATHENA'",
+            name="physician_mo_source_system_locked",
         ),
         CheckConstraint("state = 'FL'", name="physician_mo_state_fl_only"),
         Index("ix_fact_physician_mo_month", "month"),
@@ -262,7 +243,8 @@ class FactRevenueByPhysicianMo(Base, TimestampMixin):
     )
 
     source_system: Mapped[str] = mapped_column(
-        String(30), nullable=False, info={"data_class": A},
+        String(30), nullable=False, server_default="VENTRA_FL_ATHENA",
+        info={"data_class": A},
     )
     state: Mapped[str] = mapped_column(
         String(2), nullable=False, server_default="FL", info={"data_class": A}
@@ -273,13 +255,7 @@ class FactRevenueByPhysicianMo(Base, TimestampMixin):
     )
 
 
-# Provenance values — exported for app code to use without string typos.
-SOURCE_PREAGG = "VENTRA_FL_PREAGG"
-SOURCE_STDSPEC = "VENTRA_FL_STDSPEC_AGG"
-
 __all__ = [
-    "SOURCE_PREAGG",
-    "SOURCE_STDSPEC",
     "FactArSnapshot",
     "FactCollectionsDaily",
     "FactRevenueByPhysicianMo",
