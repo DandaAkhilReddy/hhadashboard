@@ -30,6 +30,10 @@ build/
 .coverage
 .coverage.*
 htmlcov/
+coverage/
+coverage.json
+coverage.xml
+lcov.info
 .tox/
 
 # Node / Next.js

@@ -1,7 +1,14 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "files": {
-    "ignore": ["node_modules", ".next", "lib/api-types.ts", "test-results", "playwright-report"]
+    "ignore": [
+      "node_modules",
+      ".next",
+      "lib/api-types.ts",
+      "test-results",
+      "playwright-report",
+      "coverage"
+    ]
   },
   "formatter": {
     "enabled": true,
